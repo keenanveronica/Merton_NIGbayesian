@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Conda/venv
+.venv/
+env/
+.conda/
+
+# Data (DO NOT COMMIT)
+data/
+*.csv
+*.xlsx
+*.parquet
+*.pkl
+
+# Outputs
+outputs/
+results/
+figures/
+
+# OS
+.DS_Store
+Thumbs.db
