@@ -1,0 +1,10 @@
+name: Accenture
+channels:
+  - defaults
+dependencies:
+  - python
+  - pandas
+  - pip
+  - ipykernel
+  - numpy
+prefix: C:\Users\vkeenan\AppData\Local\miniconda3\envs\Accenture
