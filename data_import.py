@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 import requests
 import xml.etree.ElementTree as ET
+from typing import Optional, Tuple
 
 
 def load_data(
@@ -17,7 +18,8 @@ def load_data(
     Parameters
     ----------
     xlsx_path : Path or None
-        Full path to the Excel file. If None, uses Path.cwd() / "Jan2025_Accenture_Dataset_ErasmusCase.xlsx".
+        Full path to the Excel file. If None,
+        uses Path.cwd() / "data/raw/Jan2025_Accenture_Dataset_ErasmusCase.xlsx".
     min_days_per_firm : int
         If > 0, keeps only firms with at least this many daily return observations.
     verbose : bool
@@ -32,7 +34,7 @@ def load_data(
     """
     # check file existance in current working directory
     if xlsx_path is None:
-        xlsx_path = Path.cwd() / "Jan2025_Accenture_Dataset_ErasmusCase.xlsx"
+        xlsx_path = Path.cwd() / "data/raw/Jan2025_Accenture_Dataset_ErasmusCase.xlsx"
     xlsx_path = Path(xlsx_path)
 
     if not xlsx_path.exists():
