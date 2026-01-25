@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?><message:StructureSpecificData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:common="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:data="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/structurespecific" xmlns:ecb_fmd2="urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=ECB:ECB_FMD2(1.0):ObsLevelDim:TIME_PERIOD" xsi:schemaLocation="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message http://data-api.ecb.europa.eu:80/vocabulary/sdmx/2_1/SDMXMessage.xsd http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common http://data-api.ecb.europa.eu:80/vocabulary/sdmx/2_1/SDMXCommon.xsd urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=ECB:ECB_FMD2(1.0):ObsLevelDim:TIME_PERIOD http://data-api.ecb.europa.eu:80/service/schema/datastructure/ECB/ECB_FMD2/1.0">
 <message:Header>
-<message:ID>a37a4bf1-9c5b-4d9a-b2b0-627026efd5da</message:ID>
+<message:ID>bf5fe9fd-c6dd-42bb-8309-0fb01fbfe0e2</message:ID>
 <message:Test>false</message:Test>
-<message:Prepared>2026-01-23T18:18:51.718+00:00</message:Prepared>
+<message:Prepared>2026-01-25T11:23:54.780+00:00</message:Prepared>
 <message:Sender id="ECB"/>
 <message:Structure structureID="ECB_FMD2" dimensionAtObservation="TIME_PERIOD" namespace="urn:sdmx:org.sdmx.infomodel.datastructure.DataStructure=ECB:ECB_FMD2(1.0):ObsLevelDim:TIME_PERIOD">
 <common:Structure>
@@ -10,8 +10,8 @@
 </common:Structure>
 </message:Structure>
 </message:Header>
-<message:DataSet data:action="Replace" data:validFromDate="2026-01-23T18:18:51.718+00:00" data:structureRef="ECB_FMD2" data:dataScope="DataStructure" xsi:type="ecb_fmd2:DataSetType">
-<Series FREQ="B" REF_AREA="U2" CURRENCY="EUR" PROVIDER_FM="4F" INSTRUMENT_FM="G_N_A" PROVIDER_FM_ID="SV_C_YM" DATA_TYPE_FM="SR_1Y" COLLECTION="E" DECIMALS="6" TIME_FORMAT="P1D" UNIT_MULT="0" TITLE="Yield curve spot rate, 1-year maturity - Government bond, nominal, all issuers whose rating is triple A - Euro area (changing composition)" TITLE_COMPL="Euro area (changing composition) - Government bond, nominal, all issuers whose rating is triple A - Svensson model - continuous compounding - yield error minimisation - Yield curve spot rate, 1-year maturity" COMPILATION="Technical notes are available at the following link: https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_area_yield_curves/shared/pdf/technical_notes.pdf" UNIT="PCPA">
+<message:DataSet data:action="Replace" data:validFromDate="2026-01-25T11:23:54.780+00:00" data:structureRef="ECB_FMD2" data:dataScope="DataStructure" xsi:type="ecb_fmd2:DataSetType">
+<Series FREQ="B" REF_AREA="U2" CURRENCY="EUR" PROVIDER_FM="4F" INSTRUMENT_FM="G_N_A" PROVIDER_FM_ID="SV_C_YM" DATA_TYPE_FM="SR_1Y" COLLECTION="E" TIME_FORMAT="P1D" DECIMALS="6" TITLE_COMPL="Euro area (changing composition) - Government bond, nominal, all issuers whose rating is triple A - Svensson model - continuous compounding - yield error minimisation - Yield curve spot rate, 1-year maturity" UNIT_MULT="0" TITLE="Yield curve spot rate, 1-year maturity - Government bond, nominal, all issuers whose rating is triple A - Euro area (changing composition)" UNIT="PCPA" COMPILATION="Technical notes are available at the following link: https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_area_yield_curves/shared/pdf/technical_notes.pdf">
 <Obs TIME_PERIOD="2010-01-04" OBS_VALUE="0.8330208115555013" OBS_STATUS="A" OBS_CONF="F"/>
 <Obs TIME_PERIOD="2010-01-05" OBS_VALUE="0.7934123318377239" OBS_STATUS="A" OBS_CONF="F"/>
 <Obs TIME_PERIOD="2010-01-06" OBS_VALUE="0.7782110945859885" OBS_STATUS="A" OBS_CONF="F"/>

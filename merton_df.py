@@ -122,3 +122,49 @@ def equity_volatility(
     df["sigma_E"] = df["sigma_E_daily"] * np.sqrt(trading_days)
 
     return df
+
+
+def fill_liabilities_B(merton_inputs_vol: pd.DataFrame,
+                       B_col: str = "B",
+                       final_date_col: str = "final_date",
+                       method: str = "ffill_then_bfill_initial") -> pd.DataFrame:
+    """
+    Create a filled-liabilities version of the Merton input panel.
+
+    method:
+      - "bfill_only": pure backfill (uses future info for any missing point)
+      - "ffill_then_bfill_initial": forward-fill within firm, then backfill remaining (typically initial block)
+
+    Returns df with:
+      - B_filled
+      - final_date_filled
+      - B_imputed (True if original B was missing and is now filled)
+    """
+
+    df = merton_inputs_vol.copy()
+    df = df.sort_values(["gvkey", "date"]).reset_index(drop=True)
+
+    g = df.groupby("gvkey", sort=False)
+
+    if method == "bfill_only":
+        df["B_filled"] = g[B_col].transform(lambda s: s.bfill())
+        df["final_date_filled"] = g[final_date_col].transform(lambda s: s.bfill())
+
+    elif method == "ffill_then_bfill_initial":
+        # 1) Use past info first (no look-ahead) wherever possible
+        B_ff = g[B_col].transform(lambda s: s.ffill())
+        fd_ff = g[final_date_col].transform(lambda s: s.ffill())
+
+        # 2) Only remaining NaNs (usually the initial block) are filled using the first available future statement
+        B_bf = g[B_col].transform(lambda s: s.bfill())
+        fd_bf = g[final_date_col].transform(lambda s: s.bfill())
+
+        df["B_filled"] = B_ff.fillna(B_bf)
+        df["final_date_filled"] = fd_ff.fillna(fd_bf)
+
+    else:
+        raise ValueError("Unknown method. Use 'bfill_only' or 'ffill_then_bfill_initial'.")
+
+    df["B_imputed"] = df[B_col].isna() & df["B_filled"].notna()
+
+    return df
