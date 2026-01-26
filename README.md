@@ -16,10 +16,9 @@
   Working notebook for exploration / pipeline checks.
 
 **Local-only (not tracked):**
+Please note that the following folders need to be created and placed locally before running the code. 
 - `data/raw/` – provided raw dataset(s)
 - `data/derived/` – intermediate outputs (e.g., `calib_*.csv`)
-- `outputs/`, `results/`, `figures/` – plots/tables
-
 ---
 
 ## 1) Setup (Conda)
