@@ -1,10 +1,8 @@
 from __future__ import annotations
-
 import numpy as np
 from typing import Dict, Tuple, Optional
 from scipy.stats import geninvgauss, gamma, multivariate_normal
 from scipy.stats import norminvgauss
-from __future__ import annotations
 
 from nig_initialization import (
     invert_nig_call_price,

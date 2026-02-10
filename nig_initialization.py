@@ -24,10 +24,10 @@ from typing import Tuple, Dict
 from scipy.stats import norminvgauss
 from scipy.optimize import brentq
 
-
-
 # Compute the NIG 'gamma' parameter: gamma = sqrt(alpha^2 - beta^2).
 # In your notation beta is stored as beta1; alpha must exceed |beta1|.
+
+
 def gamma_param(params: Dict[str, float]) -> float:
     alpha = params.get("alpha", 0.0)
     beta1 = params.get("beta1", 0.0)
@@ -195,7 +195,7 @@ def update_theta(params: Dict[str, float], r_f: float) -> float:
     if abs(beta0) > bound:
         raise ValueError("theta existence condition violated: |beta0| too large")
 
-    # Closed-form theta (Proposal eq. 3; equivalent to Jovan eq. 24). 
+    # Closed-form theta (Proposal eq. 3; equivalent to Jovan eq. 24).
     inside = 4.0 * (alpha ** 2) * (delta ** 2) * ((beta0 - r_f) ** 2) + (delta ** 2)
     if inside < 0.0:
         raise ValueError("theta closed-form invalid: negative value under sqrt")
@@ -247,7 +247,6 @@ def _compute_pd_with_beta(
     return float(pd)
 
 
-
 # Physical-measure PD:
 # uses beta = beta1 (no risk-neutral tilt).
 def compute_pd_physical(A0: float, L: float, T: float, params: Dict[str, float]) -> float:
@@ -264,7 +263,6 @@ def compute_pd_physical(A0: float, L: float, T: float, params: Dict[str, float])
         alpha=alpha, beta=beta1,
         beta0=beta0, delta=delta
     )
-
 
 
 # Risk-neutral PD:
