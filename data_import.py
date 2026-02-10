@@ -10,6 +10,7 @@ def load_data(
     xlsx_path: Optional[Path] = None,
     min_days_per_firm: int = 0,
     verbose: bool = True,
+    liabilities_scale="auto",   # "auto", "none", or a numeric factor (e.g. 1e6)
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Load Accenture Erasmus Case xlsx, clean market data and balance sheet data,
@@ -136,6 +137,59 @@ def load_data(
         .sort_values(["gvkey", "final_date"])
     )
 
+    # AUTO-SCALE liabilities into the same units as market cap (mcap)
+    scale_used = 1.0
+    if liabilities_scale == "auto":
+        # For merge_asof: sort by the merge key first, then by gvkey
+        mkt_tmp = (
+            mkt_clean[["gvkey", "date", "mcap"]]
+            .dropna(subset=["mcap"])
+            .sort_values(["date", "gvkey"])
+            .reset_index(drop=True)
+        )
+        bs_tmp = (
+            bs[["gvkey", "final_date", "liabilities_total"]]
+            .dropna(subset=["final_date", "liabilities_total"])
+            .sort_values(["final_date", "gvkey"])
+            .reset_index(drop=True)
+        )
+
+        merged = pd.merge_asof(
+            mkt_tmp,
+            bs_tmp,
+            left_on="date",
+            right_on="final_date",
+            by="gvkey",
+            direction="backward",
+            allow_exact_matches=True,
+        )
+
+        mask = (
+            np.isfinite(merged["mcap"].values)
+            & np.isfinite(merged["liabilities_total"].values)
+            & (merged["mcap"].values > 0)
+            & (merged["liabilities_total"].values > 0)
+        )
+
+        med_ratio = float(np.median(merged.loc[mask, "liabilities_total"] / merged.loc[mask, "mcap"])) if mask.any() else np.nan
+
+        if np.isfinite(med_ratio) and med_ratio < 1e-4:
+            scale_used = 1e6
+
+        if verbose:
+            print(f"[load_data] liabilities_scale='auto': median(L/mcap)={med_ratio:.3e}, scale_used={scale_used:.0f}")
+
+    elif liabilities_scale in ("none", None):
+        scale_used = 1.0
+    else:
+        # numeric factor provided explicitly
+        scale_used = float(liabilities_scale)
+
+    # Preserve raw + store scaled version
+    bs["liabilities_total_raw"] = bs["liabilities_total"].astype(float)
+    bs["liabilities_total"] = bs["liabilities_total_raw"] * scale_used
+    bs["liabilities_scale_used"] = float(scale_used)
+
     return ret_daily, bs
 
 
@@ -173,7 +227,7 @@ def load_ecb_1y_yield(
         print(response.text[:500])
         response.raise_for_status()
 
-    # ---- Parse XML into DataFrame ----
+    # Parse XML into DataFrame
     root = ET.fromstring(response.content)
     obs_elems = root.findall(".//{*}Obs")  # namespace-agnostic
 

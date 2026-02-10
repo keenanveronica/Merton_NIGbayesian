@@ -102,7 +102,7 @@ merton_calib_dropped = calibrate_merton_panel(
     calib_drop,
     B_col="B_drop",
     warm_start=True,
-    B_scale="auto",   # will likely choose 1e6 given your data magnitudes
+    B_scale= 1.0,   # will likely choose 1e6 given your data magnitudes
 )
 
 # physical PD via implied-asset drift
@@ -115,7 +115,7 @@ merton_calib_filled = calibrate_merton_panel(
     calib_filled,
     B_col="B_filled",
     warm_start=True,
-    B_scale="auto",
+    B_scale=1.0,
 )
 
 # physical PD via implied-asset drift

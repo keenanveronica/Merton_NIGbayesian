@@ -8,7 +8,7 @@ def norm_cdf(x):
 
 def merton_equity_from_assets(V, B, r, T, sigmaV):
     """
-    Equity value as a European call on firm assets (no payouts).
+    Equity value as a European call on firm assets (no dividends).
     E = V N(d1) - B e^{-rT} N(d2)
     """
     eps = 1e-12
@@ -22,7 +22,7 @@ def merton_equity_from_assets(V, B, r, T, sigmaV):
     return E_model, d1, d2, Nd1
 
 
-def _default_initial_guess(E, B, sigmaE):
+def _default_initial_guess(E, B, sigmaE):   # helper not exposed
     V0 = max(E + B, 1e-6)
     sigmaV0 = max(sigmaE * (E / max(E + B, 1e-12)), 1e-4)
     sigmaV0 = min(sigmaV0, 5.0)  # guardrail
@@ -31,9 +31,10 @@ def _default_initial_guess(E, B, sigmaE):
 
 def solve_merton_row(E, sigmaE, B, r, T, x0=None, tol=1e-10, maxfev=200):
     """
-    Solve the 2-equation Merton system for a single row:
+    Solve the 2 equation system (Merton) for a single row:
       (1) E_obs = V N(d1) - B e^{-rT} N(d2)
       (2) sigmaE_obs = N(d1) (V/E_obs) sigmaV
+
     Unknowns: V, sigmaV
 
     Uses SciPy root-finding if available. Falls back to a simple,
@@ -98,7 +99,7 @@ def solve_merton_row(E, sigmaE, B, r, T, x0=None, tol=1e-10, maxfev=200):
         return V_hat, sV_hat, float(d1), float(d2), True, "ok"
 
     except Exception:
-        # Fallback: fixed-point iteration
+        # Fallback - fixed-point iteration
         V, sV = V0, sV0
         ok = False
         for _it in range(60):
@@ -148,10 +149,9 @@ def calibrate_merton_panel(
     each gvkey for speed/stability.
     Adds: V, sigma_V, d1, d2, success, msg, DD_rn, PD_rn
 
-    B_scale:
-      - "auto": if median(B/E) is tiny (<1e-4),
-      multiplies B by 1e6 (Compustat-style millions)
-      - numeric: multiply B by this constant (e.g., 1e6 or 1.0)
+    B_scale: (since not explicit in dataset)
+    if median(B/E) is tiny (<1e-4), multiplies B by 1e6
+    (Compustat-style millions); else leaves B as is.
     """
     out = df.copy()
     out = out.sort_values(["gvkey", "date"]).reset_index(drop=True)
@@ -185,7 +185,7 @@ def calibrate_merton_panel(
     success = np.zeros(len(out), dtype=bool)
     msg = np.empty(len(out), dtype=object)
 
-    # iterate firm-by-firm for warm-start
+    # iterate firm-by-firm
     idx0 = 0
     for g, gdf in out.groupby("gvkey", sort=False):
         idxs = gdf.index.values
@@ -199,7 +199,7 @@ def calibrate_merton_panel(
             T = float(out.at[i, T_col])
 
             if warm_start and (x0 is not None):
-                # keep previous day solution as initial guess
+                # previous day solution as initial guess
                 guess = x0
             else:
                 guess = None
@@ -214,9 +214,9 @@ def calibrate_merton_panel(
             msg[i] = m
 
             if ok:
-                x0 = (V, sV)  # warm start for next row
+                x0 = (V, sV)
             else:
-                x0 = None  # reset warm-start if solver failed
+                x0 = None  # reset if solver failed
 
         if progress_every and (idxs[-1] >= idx0 + progress_every):
             idx0 = idxs[-1]
@@ -229,14 +229,14 @@ def calibrate_merton_panel(
     out["solver_msg"] = msg
     out["B_scale_used"] = scale
 
-    # --- Risk-neutral DD and PD (mu = r) ---
+    # Q measure DD and PD (mu = r) - note: approximately Q measure
     sqrtT = np.sqrt(out[T_col].astype(float).values)
     Vv = out["V"].astype(float).values
     Bb = out["B_used"].astype(float).values
     rv = out[r_col].astype(float).values
     sVv = out["sigma_V"].astype(float).values
 
-    # DD under GBM drift mu=r (risk-neutral-style DD)
+    # DD under GBM drift mu=r (risk-neutral DD)
     T_vals = out[T_col].astype(float).values
     numerator = (
         np.log(np.maximum(Vv, 1e-12) / np.maximum(Bb, 1e-12))
