@@ -1,34 +1,4 @@
-<<<<<<< HEAD
-"""
-nig_em_paper.py
-
-Compact, paper-aligned EM initialization for the NIG structural credit-risk model
-(Jovan & Ahčan): equity is priced as a call on assets under an Esscher-transformed
-(NIG) risk-neutral measure, while asset log-returns are fitted under the physical
-measure via MLE.
-
-EM loop (per Jovan & Ahčan):
-  1) E-step: infer the asset path A_t by inverting the NIG call price each day.
-  2) M-step: fit (alpha, beta, delta, mu) by maximizing the NIG log-likelihood of daily
-             asset log-returns r_t = log(A_t/A_{t-1}).
-  3) Update the Esscher tilt theta_t for each day using that day's risk-free rate r_f(t).
-
-Time scaling:
-  - Daily step h = 1/250 (trading days).
-  - Remaining maturity uses the paper's convention "T - n = 250 days":
-      T0 = (n-1)*h + 1.0
-    so the *last* observation is priced with 1-year maturity (PD horizon fixed at 1 year).
-
-This file is intentionally short and self-contained.
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, Tuple
-=======
 from typing import Dict, Tuple, Optional
->>>>>>> a292857e92e8659f1a208c43d0aa1f89b0aedc17
 
 import numpy as np
 from scipy.optimize import brentq, minimize
@@ -107,11 +77,7 @@ def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dic
     tail_plus  = 1.0 - cdf_plus
     tail_minus = 1.0 - cdf_minus
 
-<<<<<<< HEAD
-    return float(A * tail_plus - L * tail_minus)
-=======
     return float(A * tail_plus - L_disc * tail_minus)
->>>>>>> a292857e92e8659f1a208c43d0aa1f89b0aedc17
 
 
 
@@ -194,7 +160,7 @@ def get_asset_path(
     E = E_series[mask]
     L = L_series[mask]
     th = theta_series[mask]
-    
+
     n = len(E)
     h = 1/250
     T = 250 + n-1
@@ -204,7 +170,7 @@ def get_asset_path(
 
     if face_idx_full >= len(L_series):
         raise ValueError("Need liabilities 1y after end_date (end training window earlier).")
-    
+
     L_face = float(L_series[face_idx_full])
     A_path = np.empty(n, dtype=float)
 
