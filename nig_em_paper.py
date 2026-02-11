@@ -324,7 +324,7 @@ def EM_algo(
 
         # M-step: MLE update (annual params; likelihood uses daily scaling internally)
         a_new, b_new, d_new, mu_new = _fit_nig_mle_daily(
-            rA, (alpha, beta1, delta, beta0), h=1/250
+            rA, (alpha, beta1, delta, beta0)
         )
 
         # Recompute theta under proposed params to enforce pricing feasibility:
