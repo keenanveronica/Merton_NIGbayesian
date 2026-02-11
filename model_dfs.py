@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
 
+
 def build_market_rf_panel(
     ret_daily: pd.DataFrame,
     df_rf: pd.DataFrame,
