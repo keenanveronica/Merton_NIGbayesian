@@ -24,7 +24,7 @@ This file is intentionally short and self-contained.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 
 import numpy as np
 from scipy.optimize import brentq, minimize
@@ -114,7 +114,7 @@ def nig_call_price(A: float, L: float, T: float, r: float, params: Dict[str, flo
     tail_plus = 1.0 - cdf_plus
     tail_minus = 1.0 - cdf_minus
 
-    return float(A * tail_plus - L * np.exp(-r * T) * tail_minus)
+    return float(A * tail_plus - L * tail_minus)
 
 
 def invert_nig_call_price(

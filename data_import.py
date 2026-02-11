@@ -176,9 +176,6 @@ def load_data(
         if np.isfinite(med_ratio) and med_ratio < 1e-4:
             scale_used = 1e6
 
-        if verbose:
-            print(f"[load_data] liabilities_scale='auto': median(L/mcap)={med_ratio:.3e}, scale_used={scale_used:.0f}")
-
     elif liabilities_scale in ("none", None):
         scale_used = 1.0
     else:

@@ -25,3 +25,8 @@ figures/
 # OS
 .DS_Store
 Thumbs.db
+
+# Additional
+rf_import.py
+merton_df.py
+nig_df.py

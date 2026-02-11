@@ -1,11 +1,7 @@
 import pandas as pd
 import numpy as np
 from data_import import load_data, load_ecb_1y_yield
-from merton_df import (
-    build_merton_inputs,
-    equity_volatility,
-    fill_liabilities_B,
-)
+from model_dfs import prepare_merton_inputs
 from merton_calibration import (
     calibrate_merton_panel,
     add_physical_pd_from_implied_assets,
@@ -26,27 +22,10 @@ df_rf = load_ecb_1y_yield(
 )
 
 # Merton model inputs and implementation
-merton_inputs = build_merton_inputs(
-    ret_daily=ret_daily,
-    bs=bs,
-    df_rf=df_rf,
-    T=1.0,
-    equity_col="mcap",
-    returns_col="logret_mcap",
-    drop_missing_B=True,
-    drop_missing_r=True,
-)
-
-# Calculate equity volatility
-merton_inputs_vol = equity_volatility(
-    merton_inputs,
-    ret_col="logret_mcap",
-    window=252,
-    min_obs=126,
-)
+merton_inputs = prepare_merton_inputs(ret_daily, bs, df_rf)
 
 # BUILDING THE CALIBRATION DATASET DROPPING ROWS WITH MISSING INPUTS
-df = merton_inputs_vol.copy()
+df = merton_inputs.copy()
 
 # first date where B becomes available for each firm
 first_B_date = (
@@ -64,77 +43,40 @@ first_sigma_date = (
 )
 
 starts = pd.concat([first_B_date, first_sigma_date], axis=1)
-starts["calib_start"] = (
-    starts[["first_B_date", "first_sigma_date"]]
-    .max(axis=1)
-)
+starts["calib_start"] = starts[["first_B_date","first_sigma_date"]].max(axis=1)
 
 # attach and filter
 df2 = df.merge(starts["calib_start"], on="gvkey", how="left")
 
 calib = (
     df2[df2["date"] >= df2["calib_start"]]
-    .dropna(subset=["E", "B", "r", "sigma_E"])
-    .query("E > 0 and B > 0")
-    .copy()
-    .rename(columns={"B": "B_drop"})
+      .dropna(subset=["E","B","r","sigma_E"])
+      .query("E > 0 and B > 0")
+      .copy()
+      .rename(columns={"B":"B_drop"})
 )
+
 calib_drop = calib.copy()
 
-# BUILDING THE CALIBRATION DATASET FILLING ROWS WITH MISSING INPUTS
-# Fill B
-merton_inputs_vol_filled = fill_liabilities_B(
-    merton_inputs_vol,
-    method="ffill_then_bfill_initial"
-)
-
-# Calibration sample uses B_filled instead of B
-calib_filled = (
-    merton_inputs_vol_filled
-    .dropna(subset=["sigma_E", "E", "r", "B_filled"])
-    .query("E > 0 and B_filled > 0")
-    .copy()
-)
-
-# CALIBRATE MERTON MODEL FOR BOTH SCENARIOS
+# CALIBRATE MERTON MODEL
 # Dropped missing B calibration
-merton_calib_dropped = calibrate_merton_panel(
+merton_calib = calibrate_merton_panel(
     calib_drop,
     B_col="B_drop",
     warm_start=True,
-    B_scale= 1.0,   # will likely choose 1e6 given your data magnitudes
 )
 
 # physical PD via implied-asset drift
-merton_calib_dropped = add_physical_pd_from_implied_assets(
-    merton_calib_dropped
-)
+merton_calib = add_physical_pd_from_implied_assets(merton_calib)
 
-# Filled-B calibration
-merton_calib_filled = calibrate_merton_panel(
-    calib_filled,
-    B_col="B_filled",
-    warm_start=True,
-    B_scale=1.0,
-)
-
-# physical PD via implied-asset drift
-merton_calib_filled = add_physical_pd_from_implied_assets(merton_calib_filled)
-
-# diagnostics printout
-for name, df in [
-    ("dropped", merton_calib_dropped),
-    ("filled", merton_calib_filled),
-]:
+# diagnostics
+for name, df in [("dropped", merton_calib)]:
     print("\n---", name, "---")
-    print("B_scale_used:", df["B_scale_used"].iloc[0])
     print("Solver success rate:", df["solver_success"].mean())
-    print(
-        "V/E min:", np.nanmin(df["V"] / df["E"]),
-        "median:", np.nanmedian(df["V"] / df["E"])
-    )
+    print("V/E min:", np.nanmin(df["V"]/df["E"]), "median:", np.nanmedian(df["V"]/df["E"]))
     print("PD_rn summary:")
     print(df["PD_rn"].describe())
+
 
 # printout dataset
 cols = [

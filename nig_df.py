@@ -191,7 +191,7 @@ def make_em_inputs(
     else:
         raise ValueError("L_pick must be 'last' or 'median'.")
 
-    # sanity checks (the EM code will also enforce these) :contentReference[oaicite:4]{index=4}
+    # sanity checks (the EM code will also enforce these)
     if np.any(~np.isfinite(E)) or np.any(E <= 0.0):
         raise ValueError("Equity array contains non-finite or non-positive values.")
     if not np.isfinite(L) or L <= 0.0:

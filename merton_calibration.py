@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from scipy.special import ndtr
 
 
@@ -18,7 +19,7 @@ def merton_equity_from_assets(V, B, r, T, sigmaV):
     d2 = d1 - sig_sqrtT
     Nd1 = norm_cdf(d1)
     Nd2 = norm_cdf(d2)
-    E_model = V * Nd1 - B * np.exp(-r*T) * Nd2
+    E_model = V * Nd1 - B * Nd2
     return E_model, d1, d2, Nd1
 
 
@@ -140,42 +141,25 @@ def calibrate_merton_panel(
     sigmaE_col="sigma_E",
     r_col="r",
     T_col="T",
+    T: float = 1.0,          # NEW: default if T_col not present
+    B_scale: float = 1.0,    # NEW: optional scaling
     warm_start=True,
-    B_scale="auto",
     progress_every=20000,
 ):
     """
     Calibrate Merton row-by-row, warm-starting within
     each gvkey for speed/stability.
     Adds: V, sigma_V, d1, d2, success, msg, DD_rn, PD_rn
-
-    B_scale: (since not explicit in dataset)
-    if median(B/E) is tiny (<1e-4), multiplies B by 1e6
-    (Compustat-style millions); else leaves B as is.
     """
-    out = df.copy()
-    out = out.sort_values(["gvkey", "date"]).reset_index(drop=True)
+    out = df.copy().sort_values(["gvkey", "date"]).reset_index(drop=True)
 
-    # scale B into same units as E (checking if needed)
-    B_raw = out[B_col].astype(float).values
-    E_raw = out[E_col].astype(float).values
-    mask = np.isfinite(B_raw) & np.isfinite(E_raw) & (B_raw > 0) & (E_raw > 0)
-    if B_scale == "auto":
-        med_ratio = (
-            np.median(B_raw[mask] / E_raw[mask])
-            if mask.any()
-            else np.nan
-        )
-        # intuition: if B/E is ~1e-7, B is likely in millions
-        scale = (
-            1e6
-            if (np.isfinite(med_ratio) and med_ratio < 1e-4)
-            else 1.0
-        )
-    else:
-        scale = float(B_scale)
+    # ensure T exists even if you removed it from the panel
+    if T_col not in out.columns:
+        out[T_col] = float(T)
 
-    out["B_used"] = out[B_col].astype(float) * scale
+    # create B_used from the chosen input column
+    out["B_used"] = pd.to_numeric(out[B_col], errors="coerce") * float(B_scale)
+    out["B_scale_used"] = float(B_scale)
 
     # containers
     V_hat = np.full(len(out), np.nan)
@@ -227,7 +211,6 @@ def calibrate_merton_panel(
     out["d2"] = d2_hat
     out["solver_success"] = success
     out["solver_msg"] = msg
-    out["B_scale_used"] = scale
 
     # Q measure DD and PD (mu = r) - note: approximately Q measure
     sqrtT = np.sqrt(out[T_col].astype(float).values)
