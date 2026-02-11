@@ -7,11 +7,6 @@ from scipy.stats import norminvgauss
 
 # NIG utilities
 
-def _gamma(alpha: float, beta: float) -> float:
-    """gamma = sqrt(alpha^2 - beta^2)."""
-    return float(np.sqrt(max(alpha * alpha - beta * beta, 0.0)))
-
-
 def update_theta(params: Dict[str, float], r_f: float) -> float:
     """
     Scalar Esscher update (closed form).
