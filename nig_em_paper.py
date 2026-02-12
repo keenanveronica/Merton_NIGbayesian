@@ -37,7 +37,6 @@ def update_theta_series(params: Dict[str, float], r_f_series: np.ndarray) -> np.
 
 
 # Equity pricing under NIG - we can turn this into a series function
-
 def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dict[str, float]) -> float:
     if A <= 0.0 or L_face <= 0.0 or L_disc <= 0.0 or T <= 0.0:
         return np.nan
@@ -67,7 +66,6 @@ def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dic
     tail_minus = 1.0 - cdf_minus
 
     return float(A * tail_plus - L_disc * tail_minus)
-
 
 
 # CAN BE CONVERTED TO A "ROOT" FINDER ALSO - check if we should do this in series
@@ -115,26 +113,31 @@ def invert_nig_call_price(
         return float(brentq(f, A_min, A_max, xtol=tol, maxiter=max_iter))
     except Exception:
         return float(E_obs + L_face)
-#NEED TO MAKE PRINTS TO CHECK IF THIS IS BEING DONE CORRECTLY
 
 
+# NEED TO MAKE PRINTS TO CHECK IF THIS IS BEING DONE CORRECTLY
 def get_asset_path(
-        params: Dict[str, float],
-        theta_series: np.ndarray,
-        dates: np.ndarray,
-        E_series: np.ndarray,
-        L_series: np.ndarray, #NEED TO BE DISCOUNTED
-        start_date: None,
-        end_date: None,
+    params: Dict[str, float],
+    theta_series: np.ndarray,
+    rf_series: np.ndarray,        # NEW: needed to compute Le^{-r tau}
+    dates: np.ndarray,
+    E_series: np.ndarray,
+    L_face_series: np.ndarray,    # NEW meaning: FACE liabilities (strike proxy), NOT discounted
+    start_date: None,
+    end_date: None,
+    *,
+    daycount: int = 250,
+    discounting: str = "continuous",  # "continuous" matches exp(-r*tau) in Eq (26)
 ) -> np.ndarray:
 
     dates = np.asarray(dates)
     E_series = np.asarray(E_series, dtype=float)
-    L_series = np.asarray(L_series, dtype=float)
+    L_face_series = np.asarray(L_face_series, dtype=float)
     theta_series = np.asarray(theta_series, dtype=float)
+    rf_series = np.asarray(rf_series, dtype=float)
 
-    if not (len(dates) == len(E_series) == len(L_series) == len(theta_series)):
-        raise ValueError("dates, E_series, L_series, theta_series must have the same length")
+    if not (len(dates) == len(E_series) == len(L_face_series) == len(theta_series) == len(rf_series)):
+        raise ValueError("dates, E_series, L_face_series, theta_series, rf_series must have the same length")
 
     # date slice (inclusive)
     mask = np.ones(len(dates), dtype=bool)
@@ -144,42 +147,51 @@ def get_asset_path(
         mask &= (dates <= end_date)
 
     E = E_series[mask]
-    L = L_series[mask]
+    r = rf_series[mask]
     th = theta_series[mask]
 
     n = len(E)
-    h = 1/250
-    T = 250 + n-1
+    if n < 3:
+        raise ValueError("Training window too short")
 
-    end_idx_full = np.where(mask)[0][-1]     # last index in full arrays that is inside training window
-    face_idx_full = end_idx_full + 250       # 1 trading year ahead
+    h = 1.0 / daycount
+    T_days = (daycount + (n - 1))  # same structure as your current code: end-of-window has tau=1y
 
-    if face_idx_full >= len(L_series):
-        raise ValueError("Need liabilities 1y after end_date (end training window earlier).")
+    end_idx_full = np.where(mask)[0][-1]     # last index in full arrays inside training window
+    L_face = float(L_face_series[end_idx_full])  # PAPER STYLE: constant L at evaluation date :contentReference[oaicite:4]{index=4}
 
-    L_face = float(L_series[face_idx_full])
+    if not (np.isfinite(L_face) and L_face > 0):
+        raise ValueError("Invalid L_face at end of window")
+
     A_path = np.empty(n, dtype=float)
 
     for t in range(n):
-        T_rem = (T - t) * h  # convert remaining days to years
+        tau = (T_days - t) * h  # in years
+
+        # discounted strike in Eq (26): L * exp(-r * tau) :contentReference[oaicite:5]{index=5}
+        r_t = float(r[t])
+        if discounting == "continuous":
+            L_disc = L_face * np.exp(-r_t * tau)
+        elif discounting == "simple":
+            L_disc = L_face / (1.0 + r_t * tau)
+        else:
+            raise ValueError("discounting must be 'continuous' or 'simple'")
 
         params_t = dict(params)
         params_t["theta"] = float(th[t])
 
         A_path[t] = invert_nig_call_price(
             E_obs=float(E[t]),
-            L=float(L[t]),
-            L_face=L_face, # WE MIGHT NEED TO CHANGE THIS
-            T=float(T_rem),
+            L=float(L_disc),       # this is Le^{-r tau}
+            L_face=float(L_face),  # this is face L in ln(L/A)
+            T=float(tau),
             params=params_t,
         )
 
     return A_path
 
 
-
 # M-step: NIG likelihood (paper)
-
 def _nig_negloglik_daily(r, alpha, beta, delta_annual, mu_annual):
 
     h = 1/250
@@ -202,7 +214,6 @@ def _nig_negloglik_daily(r, alpha, beta, delta_annual, mu_annual):
         return 1e50
 
     return float(-np.sum(ll))
-
 
 
 def _fit_nig_mle_daily(
@@ -238,7 +249,6 @@ def _fit_nig_mle_daily(
 
 
 # EM initialization (paper)
-
 def EM_algo(
     E_series: np.ndarray,
     L_series: np.ndarray,     # discounted liability series
@@ -280,9 +290,10 @@ def EM_algo(
         A_path = get_asset_path(
             params={"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
             theta_series=theta_full,
+            rf_series=rf_series,
             dates=dates,
             E_series=E_series,
-            L_series=L_series,
+            L_face_series=L_series,
             start_date=start_date,
             end_date=end_date,
         )
@@ -338,9 +349,10 @@ def EM_algo(
     A_win = get_asset_path(
         params={"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
         theta_series=theta_full,
+        rf_series=rf_series,
         dates=dates,
         E_series=E_series,
-        L_series=L_series,
+        L_face_series=L_series,
         start_date=start_date,
         end_date=end_date,
     )
@@ -423,49 +435,41 @@ def compute_pd_risk_neutral(A0: float, L: float, T: float, params: Dict[str, flo
 
 
 def one_year_pd_timeseries(
-    out: dict,
-    L_series_full: np.ndarray
-) -> pd.DataFrame:
-
+        out: dict,
+        L_face_series_full: np.ndarray) -> pd.DataFrame:
     params = out["params"]
     dates_win = np.asarray(out["dates_win"])
-    idx_win = np.asarray(out["idx_win"], dtype=int)      # indices in full series
+    idx_win = np.asarray(out["idx_win"], dtype=int)
     A_win = np.asarray(out["A_win"], dtype=float)
     theta_win = np.asarray(out["theta_win"], dtype=float)
 
-    L_series_full = np.asarray(L_series_full, dtype=float)
+    L_face_series_full = np.asarray(L_face_series_full, dtype=float)
 
-    # 1y-ahead index in the *full* series
-    horizon_idx = idx_win + 250
-    ok = horizon_idx < len(L_series_full)
-
-    L_1y = np.full(len(idx_win), np.nan, dtype=float)
-    L_1y[ok] = L_series_full[horizon_idx[ok]]
+    # Use L at time t (no look-ahead)
+    L_t = np.full(len(idx_win), np.nan, dtype=float)
+    ok = idx_win < len(L_face_series_full)
+    L_t[ok] = L_face_series_full[idx_win[ok]]
 
     pd_p = np.full(len(idx_win), np.nan, dtype=float)
     pd_q = np.full(len(idx_win), np.nan, dtype=float)
 
     for i in range(len(idx_win)):
-        if not ok[i]:
-            continue
         A0 = float(A_win[i])
-        Lh = float(L_1y[i])
-        if not (np.isfinite(A0) and np.isfinite(Lh) and A0 > 0.0 and Lh > 0.0):
+        L0 = float(L_t[i])
+        if not (np.isfinite(A0) and np.isfinite(L0) and A0 > 0.0 and L0 > 0.0):
             continue
 
-        # physical PD
-        pd_p[i] = compute_pd_physical(A0=A0, L=Lh, T=1.0, params=params)
+        pd_p[i] = compute_pd_physical(A0=A0, L=L0, T=1.0, params=params)
 
-        # risk-neutral PD (needs theta_t)
         params_t = dict(params)
         params_t["theta"] = float(theta_win[i])
-        pd_q[i] = compute_pd_risk_neutral(A0=A0, L=Lh, T=1.0, params=params_t)
+        pd_q[i] = compute_pd_risk_neutral(A0=A0, L=L0, T=1.0, params=params_t)
 
     return pd.DataFrame({
         "date": dates_win,
         "A_hat": A_win,
         "theta": theta_win,
-        "L_1y_proxy": L_1y,
+        "L_proxy": L_t,
         "PD_physical": pd_p,
         "PD_risk_neutral": pd_q,
     })
