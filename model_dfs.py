@@ -47,149 +47,103 @@ def build_market_rf_panel(
     return out
 
 
-def build_discounted_liabilities_daily(
+def fill_liabilities(
     bs: pd.DataFrame,
     df_rf: pd.DataFrame,
     *,
     debt_col: str = "liabilities_total",
-    rf_col: str = "r_1y",
     publication_col: str = "final_date",
     gvkey_col: str = "gvkey",
-    ref_rule: str = "dec31_prev_year",
-    bs_date_col: str = "date",
-    daycount: float = 365.0,
-    compounding: str = "simple",
-    # NEW:
-    target_max_year: int | None = None,          # e.g. max year in your market panel dates
-    tail_year_policy: str = "ffill_face",              # "drop" or "ffill_face"
+    target_max_year: int | None = None,
+    tail_year_policy: str = "ffill_face",   # "ffill_face" or "drop"
 ) -> pd.DataFrame:
     """
-    Builds daily discounted liabilities L_pv(t) within each reference year.
+    Build a DAILY liabilities series using publication dates:
 
-    If ref_rule="dec31_prev_year", then a publication in year Y is mapped to ref_year=Y-1.
+    - Forward-fill (no look-ahead): for each (gvkey, date t), use latest liabilities with pub_date <= t.
+    - Backfill only at the start: dates before the first pub_date get the first available liabilities (flagged).
+    - No discounting is performed here. Output L_pv is a face-value proxy for L (strike).
 
-    tail_year_policy:
-      - "drop": only build years for which a mapped ref_year exists in bs
-      - "ffill_face": extend each gvkey to target_max_year by carrying forward last known L_face
+    Returns columns: gvkey, date, L_pv, is_backfilled_initial
     """
 
-    # ---- 1) clean BS ----
-    cols = [gvkey_col, publication_col, debt_col]
-    if bs_date_col in bs.columns:
-        cols.append(bs_date_col)
-
-    bs2 = bs[cols].copy()
-    bs2[gvkey_col] = bs2[gvkey_col].astype(str)
-    bs2[publication_col] = pd.to_datetime(bs2[publication_col], errors="coerce")
-    bs2[debt_col] = pd.to_numeric(bs2[debt_col], errors="coerce")
-    bs2 = bs2.dropna(subset=[publication_col, debt_col])
-
-    # reference date
-    if ref_rule == "bs_date" and bs_date_col in bs2.columns:
-        bs2["ref_date"] = pd.to_datetime(bs2[bs_date_col], errors="coerce")
-        bs2 = bs2.dropna(subset=["ref_date"])
-    elif ref_rule == "dec31_prev_year":
-        ref_year = bs2[publication_col].dt.year - 1
-        bs2["ref_date"] = pd.to_datetime(ref_year.astype(str) + "-12-31")
-    else:
-        raise ValueError("ref_rule must be 'dec31_prev_year' or 'bs_date' (when bs_date_col exists).")
-
-    bs2["ref_year"] = bs2["ref_date"].dt.year
-    bs2 = bs2.rename(columns={publication_col: "pub_date", debt_col: "L_face"})
-
-    # keep last publication per gvkey-ref_year
-    bs2 = (
-        bs2.sort_values([gvkey_col, "ref_year", "pub_date"])
-           .groupby([gvkey_col, "ref_year"], as_index=False)
-           .tail(1)
-           .reset_index(drop=True)
-    )
-
-    # ---- 2) optionally extend last year(s) by ffill of L_face ----
+    # safety checks
     if tail_year_policy not in {"drop", "ffill_face"}:
         raise ValueError("tail_year_policy must be 'drop' or 'ffill_face'.")
 
-    if tail_year_policy == "ffill_face":
-        if target_max_year is None:
-            # fallback: extend to last rf year (still an assumption)
-            target_max_year = int(pd.to_datetime(df_rf["date"]).dt.year.max())
+    if "date" not in df_rf.columns:
+        raise ValueError("df_rf must contain a 'date' column for the output calendar.")
 
-        # reindex each gvkey to a full year grid and ffill the face value
-        out_blocks = []
-        for gv, g in bs2.groupby(gvkey_col, sort=False):
-            g = g.sort_values("ref_year").set_index("ref_year")
+    for c in (gvkey_col, publication_col, debt_col):
+        if c not in bs.columns:
+            raise ValueError(f"bs is missing required column '{c}'.")
 
-            full_years = pd.Index(range(int(g.index.min()), int(target_max_year) + 1), name="ref_year")
-            gg = g.reindex(full_years)
+    # 1) clean BS: keep only valid (gvkey, pub_date, L_face)
+    bs2 = bs[[gvkey_col, publication_col, debt_col]].copy()
+    bs2[gvkey_col] = bs2[gvkey_col].astype(str)
+    bs2["pub_date"] = pd.to_datetime(bs2[publication_col], errors="coerce")
+    bs2["L_face"] = pd.to_numeric(bs2[debt_col], errors="coerce")
+    bs2 = bs2.dropna(subset=["pub_date", "L_face"])
 
-            gg[gvkey_col] = gv
-            gg["L_face_source_imputed"] = gg["L_face"].isna()
+    if bs2.empty:
+        raise ValueError("After cleaning, bs contains no valid (pub_date, liabilities) rows.")
 
-            # forward-fill L_face and pub_date (pub_date indicates staleness)
-            gg["L_face"] = gg["L_face"].ffill()
-            gg["pub_date"] = gg["pub_date"].ffill()
+    # de-duplicate exact same (gvkey, pub_date) keeping the last row
+    bs2 = (
+        bs2.sort_values([gvkey_col, "pub_date"])
+           .drop_duplicates(subset=[gvkey_col, "pub_date"], keep="last")
+           .reset_index(drop=True)
+    )
 
-            # rebuild ref_date consistently
-            gg["ref_date"] = pd.to_datetime(gg.index.astype(str) + "-12-31")
+    # 2) calendar from df_rf dates (unique, sorted)
+    cal_dates = pd.to_datetime(df_rf["date"], errors="coerce").dropna().sort_values().drop_duplicates()
 
-            # drop years where we *still* don't have any L_face (e.g. firm starts after)
-            gg = gg.dropna(subset=["L_face"])
+    if cal_dates.empty:
+        raise ValueError("df_rf['date'] has no valid dates; cannot build a calendar.")
 
-            out_blocks.append(gg.reset_index())
+    if target_max_year is not None:
+        cal_dates = cal_dates[cal_dates.dt.year <= int(target_max_year)]
 
-        bs2 = pd.concat(out_blocks, ignore_index=True)
+    if cal_dates.empty:
+        raise ValueError("Calendar is empty after applying target_max_year filter.")
 
-    # if "drop", do nothing: we keep only years that exist
+    # 3) firm-date panel
+    gvkeys = bs2[gvkey_col].dropna().unique()
+    panel = pd.MultiIndex.from_product([gvkeys, cal_dates], names=[gvkey_col, "date"]).to_frame(index=False)
+    panel = panel.sort_values(["date", gvkey_col]).reset_index(drop=True)
+    rhs = bs2[[gvkey_col, "pub_date", "L_face"]].sort_values(["pub_date", gvkey_col]).reset_index(drop=True)
 
-    # ---- 3) risk-free calendar ----
-    rf = df_rf[["date", rf_col]].copy()
-    rf["date"] = pd.to_datetime(rf["date"])
-    rf[rf_col] = pd.to_numeric(rf[rf_col], errors="coerce")
-    rf = rf.dropna(subset=["date", rf_col]).sort_values("date").reset_index(drop=True)
 
-    min_year = int(bs2["ref_year"].min())
-    max_year = int(bs2["ref_year"].max())
+    # 4) as-of join (forward-fill with no look-ahead)
+    out = pd.merge_asof(
+        panel,
+        rhs,
+        left_on="date",
+        right_on="pub_date",
+        by=gvkey_col,
+        direction="backward",
+        allow_exact_matches=True,
+    )
 
-    cal = pd.DataFrame({"date": pd.date_range(f"{min_year}-01-01", f"{max_year}-12-31", freq="D")})
-    cal = pd.merge_asof(cal.sort_values("date"), rf, on="date", direction="backward", allow_exact_matches=True)
-    cal["year"] = cal["date"].dt.year
+    # 5) initial backfill (only before first pub_date)
+    first_L = rhs.groupby(gvkey_col)["L_face"].first()
+    out["is_backfilled_initial"] = out["L_face"].isna()
+    out.loc[out["is_backfilled_initial"], "L_face"] = (
+        out.loc[out["is_backfilled_initial"], gvkey_col].map(first_L).to_numpy()
+    )
 
-    # ---- 4) DF(t -> Dec31) ----
-    df_list = []
-    dt = 1.0 / daycount
+    # If some firms still have NaN, drop them safely
+    out = out.dropna(subset=["L_face"])
 
-    for y, g in cal.groupby("year", sort=True):
-        r = g[rf_col].to_numpy(dtype=float)
-        n = len(r)
-        DF = np.empty(n, dtype=float)
-        DF[-1] = 1.0
+    # 6) tail policy
+    if tail_year_policy == "drop":
+        last_pub = rhs.groupby(gvkey_col)["pub_date"].max()
+        out = out[out["date"] <= out[gvkey_col].map(last_pub)]
 
-        if compounding == "simple":
-            for i in range(n - 2, -1, -1):
-                DF[i] = DF[i + 1] / (1.0 + r[i] * dt)
-        elif compounding == "continuous":
-            acc = 0.0
-            for i in range(n - 2, -1, -1):
-                acc += r[i] * dt
-                DF[i] = np.exp(-acc)
-        else:
-            raise ValueError("compounding must be 'simple' or 'continuous'.")
-
-        tmp = g[["date"]].copy()
-        tmp["ref_year"] = int(y)
-        tmp["DF_to_dec31"] = DF
-        df_list.append(tmp)
-
-    DF_table = pd.concat(df_list, ignore_index=True)
-
-    # ---- 5) firm-year × daily DF ----
-    liab = bs2[[gvkey_col, "ref_year", "ref_date", "pub_date", "L_face"]].copy()
-    out = liab.merge(DF_table, on="ref_year", how="left")
-
-    out["L_pv"] = out["L_face"] * out["DF_to_dec31"]
-
+    # 7) output (keep L_pv name for integration)
     out = out.rename(columns={gvkey_col: "gvkey"})
-    out = out[["gvkey", "date", "L_face", "L_pv", "ref_date", "pub_date", "ref_year"]].sort_values(["gvkey", "date"])
+    out["L_pv"] = out["L_face"]
+    out = out[["gvkey", "date", "L_pv", "is_backfilled_initial"]].sort_values(["gvkey", "date"]).reset_index(drop=True)
     return out
 
 
@@ -223,7 +177,7 @@ def equity_volatility(
     sigma_E_ann(t)   = sigma_E_daily(t) * sqrt(trading_days)
 
     Parameters
-    ----------
+   -------
     window : int
         Rolling window length in trading days (252 ~ 1 year).
     min_obs : int
@@ -341,17 +295,12 @@ def prepare_merton_inputs(
     )
 
     # 2) build discounted liabilities per firm-year
-    debt_daily = build_discounted_liabilities_daily(
+    debt_daily = fill_liabilities(
         bs=bs,
         df_rf=df_rf,
         debt_col="liabilities_total",
-        rf_col="r_1y",
         publication_col="final_date",
         gvkey_col="gvkey",
-        ref_rule=ref_rule,
-        bs_date_col="date",
-        daycount=daycount,
-        compounding=compounding,
     )
 
     # 3) attach discounted liabilities to the market panel
@@ -411,17 +360,12 @@ def prepare_nig_inputs(
     )
 
     # 2) build discounted liabilities per firm-year
-    debt_daily = build_discounted_liabilities_daily(
+    debt_daily = fill_liabilities(
         bs=bs,
         df_rf=df_rf,
         debt_col="liabilities_total",
-        rf_col="r_1y",
         publication_col="final_date",
         gvkey_col="gvkey",
-        ref_rule=ref_rule,
-        bs_date_col="date",
-        daycount=daycount,
-        compounding=compounding,
     )
 
     # 3) attach discounted liabilities to the market panel as L

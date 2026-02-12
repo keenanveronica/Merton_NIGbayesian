@@ -1,5 +1,4 @@
-from typing import Dict, Tuple, Optional
-
+from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq, minimize
@@ -7,9 +6,8 @@ from scipy.stats import norminvgauss
 
 
 # NIG utilities
-
 def update_theta(params: Dict[str, float], r_f: float) -> float:
-    
+
     alpha = float(params.get("alpha", 0.0))
     beta = float(params.get("beta1", 0.0))
     delta = float(params.get("delta", 0.0))
@@ -45,9 +43,9 @@ def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dic
         return np.nan
 
     alpha = float(params.get("alpha", 0.0))
-    beta  = float(params.get("beta1", 0.0))
+    beta = float(params.get("beta1", 0.0))
     delta = float(params.get("delta", 0.0))
-    mu    = float(params.get("beta0", 0.0))
+    mu = float(params.get("beta0", 0.0))
     theta = float(params.get("theta", 0.0))
 
     if delta <= 0.0 or alpha <= 0.0 or abs(beta) >= alpha:
@@ -59,13 +57,13 @@ def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dic
     loc = mu * T
     scale = delta * T
 
-    beta_plus  = beta + theta + 1.0
+    beta_plus = beta + theta + 1.0
     beta_minus = beta + theta
 
-    cdf_plus  = norminvgauss.cdf(x0, a=alpha, b=beta_plus,  loc=loc, scale=scale)
+    cdf_plus = norminvgauss.cdf(x0, a=alpha, b=beta_plus,  loc=loc, scale=scale)
     cdf_minus = norminvgauss.cdf(x0, a=alpha, b=beta_minus, loc=loc, scale=scale)
 
-    tail_plus  = 1.0 - cdf_plus
+    tail_plus = 1.0 - cdf_plus
     tail_minus = 1.0 - cdf_minus
 
     return float(A * tail_plus - L_disc * tail_minus)
@@ -84,7 +82,7 @@ def invert_nig_call_price(
     tol: float = 1e-10,
     max_iter: int = 200,
 ) -> float:
-    
+
     if E_obs <= 0.0 or L <= 0.0 or T <= 0.0 or L_face <= 0.0:
         raise ValueError("E_obs, L, T, L_face must be positive")
 
@@ -211,7 +209,7 @@ def _fit_nig_mle_daily(
     r: np.ndarray,
     x0: Tuple[float, float, float, float],
 ) -> Tuple[float, float, float, float]:
-    
+
     h = 1/250,
     alpha0, beta0, delta0, mu0 = map(float, x0)
     beta_init = beta0
@@ -253,7 +251,7 @@ def EM_algo(
     min_iter: int = 3,
     tol: float = 1e-3,
 ) -> Dict[str, object]:
-    
+
     E_series = np.asarray(E_series, dtype=float)
     L_series = np.asarray(L_series, dtype=float)
     rf_series = np.asarray(rf_series, dtype=float)
@@ -322,7 +320,7 @@ def EM_algo(
         if (it + 1) >= min_iter and np.all(diff_last < tol):
             converged = True
             break
-    
+
     # --- build training-window outputs ---
     mask = np.ones(len(dates), dtype=bool)
     if start_date is not None:
@@ -356,6 +354,7 @@ def EM_algo(
         "A_win": A_win,          # same length as dates_win
         "theta_win": theta_win,  # same length as dates_win
     }
+
 
 def _compute_pd_with_beta(
     A0: float,
