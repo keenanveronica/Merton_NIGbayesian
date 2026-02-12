@@ -1,6 +1,7 @@
 from typing import Dict, Tuple, Optional
 
 import numpy as np
+import pandas as pd
 from scipy.optimize import brentq, minimize
 from scipy.stats import norminvgauss
 
@@ -8,12 +9,7 @@ from scipy.stats import norminvgauss
 # NIG utilities
 
 def update_theta(params: Dict[str, float], r_f: float) -> float:
-    """
-    Scalar Esscher update (closed form).
-    theta depends on the daily risk-free rate r_f.
-
-    Feasibility checks follow the paper's existence conditions.
-    """
+    
     alpha = float(params.get("alpha", 0.0))
     beta = float(params.get("beta1", 0.0))
     delta = float(params.get("delta", 0.0))
@@ -29,7 +25,7 @@ def update_theta(params: Dict[str, float], r_f: float) -> float:
 
     num = mu - float(r_f)
     inside = (4*(alpha ** 2)*(delta ** 2))/((num ** 2) + (delta ** 2))
-    theta = -beta - 0.5 - (num/(2*delta))*(np.sqrt(inside) - 1.0)
+    theta = -beta - 0.5 - (num/(2*delta))*np.sqrt(inside - 1.0)
     return float(theta)
 
 
@@ -88,10 +84,7 @@ def invert_nig_call_price(
     tol: float = 1e-10,
     max_iter: int = 200,
 ) -> float:
-    """
-    Solve for A such that nig_call_price(A,...) == E_obs (bracketing + Brent).
-    Falls back to A = E_obs + L (discounted or not?) if bracketing fails.
-    """
+    
     if E_obs <= 0.0 or L <= 0.0 or T <= 0.0 or L_face <= 0.0:
         raise ValueError("E_obs, L, T, L_face must be positive")
 
@@ -218,13 +211,7 @@ def _fit_nig_mle_daily(
     r: np.ndarray,
     x0: Tuple[float, float, float, float],
 ) -> Tuple[float, float, float, float]:
-    """
-    MLE for (alpha, beta, delta_annual, mu_annual) using a stable reparameterization:
-      beta = b
-      alpha = |b| + 0.500001 + exp(a_raw)   (enforces alpha>|beta| and alpha>=0.5)
-      delta = exp(log_delta)
-      mu = mu_raw
-    """
+    
     h = 1/250,
     alpha0, beta0, delta0, mu0 = map(float, x0)
     beta_init = beta0
@@ -256,7 +243,7 @@ def _fit_nig_mle_daily(
 
 def EM_algo(
     E_series: np.ndarray,
-    L_series: np.ndarray,     # discounted liability series (your current setup)
+    L_series: np.ndarray,     # discounted liability series
     rf_series: np.ndarray,    # daily risk-free series (needed for theta)
     dates: np.ndarray,
     start_params: Dict[str, float],
@@ -266,15 +253,7 @@ def EM_algo(
     min_iter: int = 3,
     tol: float = 1e-3,
 ) -> Dict[str, object]:
-    """
-    EM loop (Jovan & Ahcan style):
-      E-step: infer A_t by inverting the NIG call each day
-      M-step: MLE fit NIG params to daily log-returns of A_t
-      theta:  recompute daily theta_t from updated params + rf(t)
-
-    Returns a dict with final params + traces.
-    """
-
+    
     E_series = np.asarray(E_series, dtype=float)
     L_series = np.asarray(L_series, dtype=float)
     rf_series = np.asarray(rf_series, dtype=float)
@@ -289,23 +268,20 @@ def EM_algo(
     delta = float(start_params["delta"])
     beta0 = float(start_params["beta0"])
 
-    theta_trace = []
-    param_trace = []
-    diff_trace = []
     converged = False
+    diff_last = None
 
     for it in range(max_iter):
         # theta vector for this iteration (full series; get_asset_path slices internally)
-        theta_series = update_theta_series(
+        theta_full = update_theta_series(
             {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
             rf_series
         )
-        theta_trace.append(theta_series)
 
         # E-step: infer asset path on the training window
         A_path = get_asset_path(
             params={"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
-            theta_series=theta_series,
+            theta_series=theta_full,
             dates=dates,
             E_series=E_series,
             L_series=L_series,
@@ -323,46 +299,174 @@ def EM_algo(
         )
 
         # Recompute theta under proposed params to enforce pricing feasibility:
-        theta_new = update_theta_series(
+        theta_new_full = update_theta_series(
             {"alpha": a_new, "beta1": b_new, "delta": d_new, "beta0": mu_new},
             rf_series
         )
 
         # Ensure alpha is large enough so |beta+theta| < alpha and |beta+theta+1| < alpha for all days
         alpha_floor = max(
-            np.max(np.abs(b_new + theta_new)),
-            np.max(np.abs(b_new + theta_new + 1.0))
+            np.max(np.abs(b_new + theta_new_full)),
+            np.max(np.abs(b_new + theta_new_full + 1.0))
         ) + 1e-6
         if a_new < alpha_floor:
             a_new = float(alpha_floor)
 
-        diff = np.array(
+        diff_last = np.array(
             [abs(a_new - alpha), abs(b_new - beta1), abs(d_new - delta), abs(mu_new - beta0)],
             dtype=float
         )
 
-        param_trace.append((alpha, beta1, delta, beta0))
-        diff_trace.append(diff)
-
         alpha, beta1, delta, beta0 = float(a_new), float(b_new), float(d_new), float(mu_new)
 
-        if (it + 1) >= min_iter and np.all(diff < tol):
+        if (it + 1) >= min_iter and np.all(diff_last < tol):
             converged = True
             break
+    
+    # --- build training-window outputs ---
+    mask = np.ones(len(dates), dtype=bool)
+    if start_date is not None:
+        mask &= (dates >= start_date)
+    if end_date is not None:
+        mask &= (dates <= end_date)
 
-    # final theta (full series)
-    theta_final = update_theta_series(
-        {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
-        rf_series
+    idx = np.where(mask)[0]
+    dates_win = dates[mask]
+
+    theta_full = update_theta_series({"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0}, rf_series)
+    theta_win = theta_full[mask]
+
+    # final asset path for window under final params/theta
+    A_win = get_asset_path(
+        params={"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
+        theta_series=theta_full,
+        dates=dates,
+        E_series=E_series,
+        L_series=L_series,
+        start_date=start_date,
+        end_date=end_date,
     )
 
     return {
         "params": {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0},
         "converged": converged,
         "n_iter": it + 1,
-        "diff_last": diff_trace[-1] if diff_trace else None,
-        "param_trace": param_trace,
-        "diff_trace": diff_trace,
-        "theta_final": theta_final,
-        "theta_trace": theta_trace,
+        "dates_win": dates_win,
+        "idx_win": idx,          # indices in the FULL firm series
+        "A_win": A_win,          # same length as dates_win
+        "theta_win": theta_win,  # same length as dates_win
     }
+
+def _compute_pd_with_beta(
+    A0: float,
+    L: float,
+    T: float,
+    alpha: float,
+    beta: float,
+    beta0: float,
+    delta: float,
+) -> float:
+    """
+    Internal helper: PD = P(log(A_T/A0) < log(L/A0)) when log-return ~ NIG(alpha, beta, loc=beta0*T, scale=delta*T).
+    """
+    if A0 <= 0.0 or L <= 0.0 or T <= 0.0:
+        raise ValueError("A0, L and T must be positive")
+    if delta <= 0.0:
+        raise ValueError("delta must be > 0")
+    if alpha <= 0.0:
+        raise ValueError("alpha must be > 0")
+    if abs(beta) >= alpha:
+        raise ValueError("|beta| must be < alpha for a valid NIG distribution")
+
+    delta_T = delta * T
+    loc_T = beta0 * T
+    x_thresh = np.log(L / A0)
+    pd = norminvgauss.cdf(x_thresh, alpha, beta, loc=loc_T, scale=delta_T)
+    return float(pd)
+
+
+# Physical-measure PD:
+# uses beta = beta1 (no risk-neutral tilt).
+def compute_pd_physical(A0: float, L: float, T: float, params: Dict[str, float]) -> float:
+    """
+    Physical-measure PD: uses beta = beta1.
+    """
+    alpha = float(params.get("alpha", 0.0))
+    beta1 = float(params.get("beta1", 0.0))
+    beta0 = float(params.get("beta0", 0.0))
+    delta = float(params.get("delta", 0.0))
+
+    return _compute_pd_with_beta(
+        A0=A0, L=L, T=T,
+        alpha=alpha, beta=beta1,
+        beta0=beta0, delta=delta
+    )
+
+
+# Risk-neutral PD:
+# uses beta = beta1 + theta (theta must already be present in params).
+def compute_pd_risk_neutral(A0: float, L: float, T: float, params: Dict[str, float]) -> float:
+    """
+    Risk-neutral PD: uses beta = beta1 + theta.
+    Assumes params['theta'] has already been computed (e.g., via update_theta(params, r_f)).
+    """
+    alpha = float(params.get("alpha", 0.0))
+    beta1 = float(params.get("beta1", 0.0))
+    theta = float(params.get("theta", 0.0))
+    beta0 = float(params.get("beta0", 0.0))
+    delta = float(params.get("delta", 0.0))
+
+    return _compute_pd_with_beta(
+        A0=A0, L=L, T=T,
+        alpha=alpha, beta=(beta1 + theta),
+        beta0=beta0, delta=delta
+    )
+
+
+def one_year_pd_timeseries_from_em(
+    out: dict,
+    L_series_full: np.ndarray
+) -> pd.DataFrame:
+
+    params = out["params"]
+    dates_win = np.asarray(out["dates_win"])
+    idx_win = np.asarray(out["idx_win"], dtype=int)      # indices in full series
+    A_win = np.asarray(out["A_win"], dtype=float)
+    theta_win = np.asarray(out["theta_win"], dtype=float)
+
+    L_series_full = np.asarray(L_series_full, dtype=float)
+
+    # 1y-ahead index in the *full* series
+    horizon_idx = idx_win + 250
+    ok = horizon_idx < len(L_series_full)
+
+    L_1y = np.full(len(idx_win), np.nan, dtype=float)
+    L_1y[ok] = L_series_full[horizon_idx[ok]]
+
+    pd_p = np.full(len(idx_win), np.nan, dtype=float)
+    pd_q = np.full(len(idx_win), np.nan, dtype=float)
+
+    for i in range(len(idx_win)):
+        if not ok[i]:
+            continue
+        A0 = float(A_win[i])
+        Lh = float(L_1y[i])
+        if not (np.isfinite(A0) and np.isfinite(Lh) and A0 > 0.0 and Lh > 0.0):
+            continue
+
+        # physical PD
+        pd_p[i] = compute_pd_physical(A0=A0, L=Lh, T=1 params=params)
+
+        # risk-neutral PD (needs theta_t)
+        params_t = dict(params)
+        params_t["theta"] = float(theta_win[i])
+        pd_q[i] = compute_pd_risk_neutral(A0=A0, L=Lh, T=1 params=params_t)
+
+    return pd.DataFrame({
+        "date": dates_win,
+        "A_hat": A_win,
+        "theta": theta_win,
+        "L_1y_proxy": L_1y,
+        "PD_physical": pd_p,
+        "PD_risk_neutral": pd_q,
+    })
