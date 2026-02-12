@@ -187,6 +187,24 @@ def load_data(
     bs["liabilities_total"] = bs["liabilities_total_raw"] * scale_used
     bs["liabilities_scale_used"] = float(scale_used)
 
+    # Drop the 2 known firms
+    bad_pat = r"Volkswagen AG|NORDEA BANK ABP"
+    # collect gvkeys to drop
+    bad_gvkeys = set(
+        ret_daily.loc[
+            ret_daily["company"].astype(str).str.contains(bad_pat, case=False, na=False),
+            "gvkey",
+        ]
+    ).union(
+        bs.loc[
+            bs["company"].astype(str).str.contains(bad_pat, case=False, na=False),
+            "gvkey",
+        ]
+    )
+    # drop from both dataframes
+    ret_daily = ret_daily.loc[~ret_daily["gvkey"].isin(bad_gvkeys)].copy()
+    bs = bs.loc[~bs["gvkey"].isin(bad_gvkeys)].copy()
+
     return ret_daily, bs
 
 
