@@ -113,7 +113,6 @@ def fill_liabilities(
     panel = panel.sort_values(["date", gvkey_col]).reset_index(drop=True)
     rhs = bs2[[gvkey_col, "pub_date", "L_face"]].sort_values(["pub_date", gvkey_col]).reset_index(drop=True)
 
-
     # 4) as-of join (forward-fill with no look-ahead)
     out = pd.merge_asof(
         panel,

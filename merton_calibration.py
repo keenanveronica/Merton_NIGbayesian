@@ -19,7 +19,7 @@ def merton_equity_from_assets(V, B, r, T, sigmaV):
     d2 = d1 - sig_sqrtT
     Nd1 = norm_cdf(d1)
     Nd2 = norm_cdf(d2)
-    E_model = V * Nd1 - B * Nd2
+    E_model = V * Nd1 - B * np.exp(-r * T) * Nd2
     return E_model, d1, d2, Nd1
 
 
