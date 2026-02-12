@@ -1,209 +1,63 @@
 import numpy as np
 from typing import Dict, Tuple, Optional
 from scipy.stats import geninvgauss, gamma, multivariate_normal
-from scipy.stats import norminvgauss
-from scipy.optimize import brentq
+from nig_em_paper import update_theta_series, get_asset_path
 from typing import Any
 
 
-def mu_phi_from_params(params: Dict[str, float]) -> Tuple[float, float]:
+def mu_phi_from_params(params: Dict[str, float], h: float) -> Tuple[float, float]:
+    """
+    Map annual NIG params -> (mu_h, phi_h) for *daily* mixing distribution (step h).
+    Uses: delta_h = delta * h, gamma = sqrt(alpha^2 - beta^2)
+          mu_h  = delta_h / gamma
+          phi_h = delta_h * gamma
+    """
     alpha = float(params.get("alpha", 0.0))
     beta1 = float(params.get("beta1", 0.0))
     delta = float(params.get("delta", 0.0))
 
     if delta <= 0.0 or alpha <= 0.0 or abs(beta1) >= alpha:
-        raise ValueError("Need delta>0, alpha>0, and |beta1|<alpha to compute (mu,phi).")
+        raise ValueError("Need delta>0, alpha>0, and |beta1|<alpha.")
 
-    gamma = np.sqrt(alpha * alpha - beta1 * beta1)
-    mu = delta / gamma
-    phi = delta * gamma
-    return float(mu), float(phi)
+    gamma_val = float(np.sqrt(max(alpha * alpha - beta1 * beta1, 0.0)))
+    delta_h = float(delta) * float(h)
+
+    mu_h = delta_h / gamma_val
+    phi_h = delta_h * gamma_val
+    return float(mu_h), float(phi_h)
 
 
 def params_from_mu_phi(
-    mu: float, phi: float, beta0: float, beta1: float, theta: float = 0.0
+    mu_h: float, phi_h: float, beta0_h: float, beta1: float, h: float
 ) -> Dict[str, float]:
-    delta = np.sqrt(max(mu * phi, 0.0))
-    gamma_val = np.sqrt(max(phi / mu, 0.0))
-    alpha = np.sqrt(beta1 * beta1 + gamma_val * gamma_val)
+    """
+    Map (mu_h, phi_h, beta0_h, beta1) for daily step h back to annual params.
+
+      delta_h = sqrt(mu_h * phi_h)
+      gamma   = sqrt(phi_h / mu_h)
+      alpha   = sqrt(beta1^2 + gamma^2)
+      delta   = delta_h / h
+      beta0   = beta0_h / h
+    """
+    mu_h = float(mu_h)
+    phi_h = float(phi_h)
+    if mu_h <= 0.0 or phi_h <= 0.0:
+        raise ValueError("mu_h and phi_h must be positive.")
+
+    delta_h = float(np.sqrt(mu_h * phi_h))
+    gamma_val = float(np.sqrt(phi_h / mu_h))
+    alpha = float(np.sqrt(beta1 * beta1 + gamma_val * gamma_val))
+
+    delta = delta_h / float(h)
+    beta0 = float(beta0_h) / float(h)
+
     return {
         "alpha": float(alpha),
         "beta1": float(beta1),
         "delta": float(delta),
         "beta0": float(beta0),
-        "theta": float(theta),
     }
 
-
-def update_theta(params: Dict[str, float], r_f: float) -> float:
-
-    alpha = float(params.get("alpha", 0.0))
-    beta = float(params.get("beta1", 0.0))
-    delta = float(params.get("delta", 0.0))
-    mu = float(params.get("beta0", 0.0))
-
-    if delta <= 0.0 or alpha <= 0.0 or abs(beta) >= alpha:
-        raise ValueError("Invalid NIG params: require delta>0, alpha>0, and |beta|<alpha.")
-    if alpha < 0.5:
-        raise ValueError("Theta existence requires alpha >= 0.5.")
-    bound = delta * np.sqrt(max(2.0 * alpha - 1.0, 0.0))
-    if abs(mu) > bound:
-        raise ValueError("Theta existence requires |mu| <= delta*sqrt(2*alpha-1).")
-
-    num = mu - float(r_f)
-    inside = (4*(alpha ** 2)*(delta ** 2))/((num ** 2) + (delta ** 2))
-    theta = -beta - 0.5 - (num/(2*delta))*np.sqrt(inside - 1.0)
-    return float(theta)
-
-
-def update_theta_series(params: Dict[str, float], r_f_series: np.ndarray) -> np.ndarray:
-    """Vector theta_t computed day-by-day from update_theta(..., r_f[t])."""
-    r_f_series = np.asarray(r_f_series, dtype=float)
-    out = np.empty_like(r_f_series, dtype=float)
-    for t in range(r_f_series.size):
-        out[t] = update_theta(params, float(r_f_series[t]))
-    return out
-
-
-def nig_call_price(A: float, L_face: float, L_disc: float, T: float, params: Dict[str, float]) -> float:
-    if A <= 0.0 or L_face <= 0.0 or L_disc <= 0.0 or T <= 0.0:
-        return np.nan
-
-    alpha = float(params.get("alpha", 0.0))
-    beta  = float(params.get("beta1", 0.0))
-    delta = float(params.get("delta", 0.0))
-    mu    = float(params.get("beta0", 0.0))
-    theta = float(params.get("theta", 0.0))
-
-    if delta <= 0.0 or alpha <= 0.0 or abs(beta) >= alpha:
-        return np.nan
-
-    # threshold must use face value at maturity (paper)
-    x0 = np.log(L_face / A)
-
-    loc = mu * T
-    scale = delta * T
-
-    beta_plus  = beta + theta + 1.0
-    beta_minus = beta + theta
-
-    cdf_plus  = norminvgauss.cdf(x0, a=alpha, b=beta_plus,  loc=loc, scale=scale)
-    cdf_minus = norminvgauss.cdf(x0, a=alpha, b=beta_minus, loc=loc, scale=scale)
-
-    tail_plus  = 1.0 - cdf_plus
-    tail_minus = 1.0 - cdf_minus
-
-    return float(A * tail_plus - L_disc * tail_minus)
-
-
-# CAN BE CONVERTED TO A "ROOT" FINDER ALSO - check if we should do this in series
-def invert_nig_call_price(
-    E_obs: float,
-    L: float,
-    L_face: float,
-    T: float,
-    params: Dict[str, float],
-    A_min_factor: float = 1e-6,
-    A_max_factor: float = 50,
-    tol: float = 1e-10,
-    max_iter: int = 200,
-) -> float:
-    """
-    Solve for A such that nig_call_price(A,...) == E_obs (bracketing + Brent).
-    Falls back to A = E_obs + L (discounted or not?) if bracketing fails.
-    """
-    if E_obs <= 0.0 or L <= 0.0 or T <= 0.0 or L_face <= 0.0:
-        raise ValueError("E_obs, L, T, L_face must be positive")
-
-    A_min = max(E_obs, A_min_factor * L_face)
-    A_max = A_max_factor * (E_obs + L_face)
-
-    def f(A: float) -> float:
-        return nig_call_price(A, L_face=L_face, L_disc=L, T=T, params=params) - E_obs
-
-    f_min, f_max = f(A_min), f(A_max)
-    if not (np.isfinite(f_min) and np.isfinite(f_max)):
-        return float(E_obs + L_face)
-
-    if f_min * f_max > 0.0:
-        # Expand bracket
-        success = False
-        for i in range(1, 18):
-            factor = 2.0 ** i
-            A_max_ext = A_max * factor
-            A_min_ext = max(A_min / factor, 1e-12)
-            f_min_ext, f_max_ext = f(A_min_ext), f(A_max_ext)
-            if np.isfinite(f_min_ext) and np.isfinite(f_max_ext) and (f_min_ext * f_max_ext <= 0.0):
-                A_min, A_max = A_min_ext, A_max_ext
-                success = True
-                break
-        if not success:
-            return float(E_obs + L_face)
-
-    try:
-        return float(brentq(f, A_min, A_max, xtol=tol, maxiter=max_iter))
-    except Exception:
-        return float(E_obs + L_face)
-#NEED TO MAKE PRINTS TO CHECK IF THIS IS BEING DONE CORRECTLY
-
-#we dont use this function in the gibbs
-def get_asset_path(
-        params: Dict[str, float],
-        theta_series: np.ndarray,
-        dates: np.ndarray,
-        E_series: np.ndarray,
-        L_series: np.ndarray, #NEED TO BE DISCOUNTED
-        start_date: None,
-        end_date: None,
-) -> np.ndarray:
-
-    dates = np.asarray(dates)
-    E_series = np.asarray(E_series, dtype=float)
-    L_series = np.asarray(L_series, dtype=float)
-    theta_series = np.asarray(theta_series, dtype=float)
-
-    if not (len(dates) == len(E_series) == len(L_series) == len(theta_series)):
-        raise ValueError("dates, E_series, L_series, theta_series must have the same length")
-
-    # date slice (inclusive)
-    mask = np.ones(len(dates), dtype=bool)
-    if start_date is not None:
-        mask &= (dates >= start_date)
-    if end_date is not None:
-        mask &= (dates <= end_date)
-
-    E = E_series[mask]
-    L = L_series[mask]
-    th = theta_series[mask]
-
-    n = len(E)
-    h = 1/250
-    T = 250 + n-1
-
-    end_idx_full = np.where(mask)[0][-1]     # last index in full arrays that is inside training window
-    face_idx_full = end_idx_full + 250       # 1 trading year ahead
-
-    if face_idx_full >= len(L_series):
-        raise ValueError("Need liabilities 1y after end_date (end training window earlier).")
-
-    L_face = float(L_series[face_idx_full])
-    A_path = np.empty(n, dtype=float)
-
-    for t in range(n):
-        T_rem = (T - t) * h  # convert remaining days to years
-
-        params_t = dict(params)
-        params_t["theta"] = float(th[t])
-
-        A_path[t] = invert_nig_call_price(
-            E_obs=float(E[t]),
-            L=float(L[t]),
-            L_face=L_face, # WE MIGHT NEED TO CHANGE THIS
-            T=float(T_rem),
-            params=params_t,
-        )
-
-    return A_path
 
 
 def sample_gig(
@@ -232,6 +86,7 @@ def sample_z_posterior(
         psi = alpha2
         z[i] = sample_gig(lam=-1.0, chi=chi, psi=psi, rng=rng)
     return z
+
 
 def sample_mu_phi(
     z: np.ndarray,
@@ -276,6 +131,7 @@ def sample_mu_phi(
 
     return mu_new, phi_new
 
+
 def sample_beta(
     returns: np.ndarray,
     z: np.ndarray,
@@ -308,29 +164,28 @@ def sample_beta(
     beta_draw = multivariate_normal.rvs(mean=b_mean, cov=B_new, random_state=rng)
     return float(beta_draw[0]), float(beta_draw[1])
 
+
+from typing import Any
+
 def gibbs_sampler(
     E_series: np.ndarray,
-    L_series: np.ndarray,
+    L_series: np.ndarray,        # IMPORTANT: same convention as EM/get_asset_path (your current discounted proxy)
     rf_series: np.ndarray,
     dates: np.ndarray,
     start_date=None,
     end_date=None,
-    max_iter: int = 10,
+    max_iter: int = 2000,
     *,
     em_params: Dict[str, float],
-    burn_in: int = 0,
-    thin: int = 1,
-    # model/time conventions (paper/proposal)
+    burn_in: int = 500,
+    thin: int = 5,
     trading_days: int = 250,
-    pd_horizon_years: float = 1.0,
-    # RNG
     rng: Optional[np.random.Generator] = None,
 ) -> Dict[str, Any]:
 
     if rng is None:
         rng = np.random.default_rng()
 
-    # basic checks
     E_series = np.asarray(E_series, dtype=float)
     L_series = np.asarray(L_series, dtype=float)
     rf_series = np.asarray(rf_series, dtype=float)
@@ -338,15 +193,14 @@ def gibbs_sampler(
 
     if not (E_series.shape == L_series.shape == rf_series.shape == dates.shape):
         raise ValueError("E_series, L_series, rf_series, dates must have same shape")
-    if max_iter <= 0:
-        raise ValueError("max_iter must be positive")
     if burn_in < 0 or burn_in >= max_iter:
         raise ValueError("burn_in must be in [0, max_iter-1]")
     if thin <= 0:
         raise ValueError("thin must be >= 1")
 
+    h = 1.0 / float(trading_days)
 
-    # slice training window
+    # --- training window mask (same as your EM/get_asset_path) ---
     mask = np.ones(dates.size, dtype=bool)
     if start_date is not None:
         mask &= (dates >= start_date)
@@ -357,197 +211,184 @@ def gibbs_sampler(
     if idx.size < 3:
         raise ValueError("Need at least 3 observations in the training window")
 
-    E = E_series[idx]
-    rf = rf_series[idx]
+    n = int(idx.size)
 
-    n = idx.size
-    h = 1.0 / float(trading_days)
+    # --- EM init (annual params) ---
+    alpha = float(em_params["alpha"])
+    beta1 = float(em_params["beta1"])
+    delta = float(em_params["delta"])
+    beta0 = float(em_params["beta0"])
 
-    # Paper/proposal maturity convention: last observation has pd_horizon_years maturity
-    T0 = (n - 1) * h + float(pd_horizon_years)
+    # convert EM -> daily (mu_h, phi_h, beta0_h)
+    mu_h, phi_h = mu_phi_from_params({"alpha": alpha, "beta1": beta1, "delta": delta}, h=h)
+    beta0_h = beta0 * h
 
-    # Need the liability (face) at maturity date = end_of_window + 1 trading year
-    end_idx_full = idx[-1]
-    face_idx_full = end_idx_full + trading_days
-    if face_idx_full >= L_series.size:
-        raise ValueError("Need liabilities at end_date + 1 trading year (extend L_series or shorten window).")
-    L_face = float(L_series[face_idx_full])  # strike at maturity
+    # priors centered at EM (weakly informative) — keep same spirit, but intercept is daily
+    b0_prior = np.array([beta0_h, beta1], dtype=float)
+    B0_prior = np.diag([50.0 * h * h, 50.0]).astype(float)  # scale beta0 variance by h^2
 
-
-    # get EM estimates
-    alpha_em = float(em_params["alpha"])
-    beta1_em = float(em_params["beta1"])
-    delta_em = float(em_params["delta"])
-    beta0_em = float(em_params["beta0"])
-
-    #compute gamma (EM)
-    gamma_em = float(np.sqrt(max(alpha_em * alpha_em - beta1_em * beta1_em, 0.0)))
-
-    #convert delta, gammma to mu, phi (also EM)
-    mu_em = delta_em / gamma_em
-    phi_em = delta_em * gamma_em
-
-    #computing hyperparameter in order to center the priors
-    var_phi = 100.0 # fixed (karlis)
+    # hyper centered at EM daily (phi variance fixed at 100, per your previous convention)
+    var_phi = 100.0
     hyper = {
-        "xi": (phi_em * phi_em) / var_phi,
-        "chi": phi_em / var_phi,
-        "eta": mu_em,
-        "omega": 0.001,  # fixed (karlis)
+        "xi": (phi_h * phi_h) / var_phi,
+        "chi": phi_h / var_phi,
+        "eta": mu_h,
+        "omega": 0.001,
     }
 
-    b0_prior = np.array([beta0_em, beta1_em], dtype=float)
-    B0_prior = np.diag([50.0, 50.0]).astype(float)
-
-    #initialize chain at EM
-    mu = float(mu_em)
-    phi = float(phi_em)
-    beta0 = float(beta0_em)
-    beta1 = float(beta1_em)
-
-    # Map back to (alpha,delta) each time using your helper
-    # (assumes you already have params_from_mu_phi in scope)
-    params_cur = params_from_mu_phi(mu, phi, beta0=beta0, beta1=beta1, theta=0.0)
-    alpha = float(params_cur["alpha"])
-    delta = float(params_cur["delta"])
-
-    # storage sizes
+    # --- storage ---
     keep_mask = np.zeros(max_iter, dtype=bool)
     for it in range(max_iter):
         if it >= burn_in and ((it - burn_in) % thin == 0):
             keep_mask[it] = True
     n_keep = int(keep_mask.sum())
 
-    # storage vectors
     A_draws = np.full((n_keep, n), np.nan, dtype=float)
     theta_draws = np.full((n_keep, n), np.nan, dtype=float)
     z_draws = np.full((n_keep, n - 1), np.nan, dtype=float)
+
+    # store ANNUAL params (consistent with EM)
     params_draws = np.full((n_keep, 4), np.nan, dtype=float)  # [alpha,beta1,delta,beta0]
-    mu_phi_mat = np.full((n_keep, 2), np.nan, dtype=float)  # [mu,phi]
+    mu_phi_draws = np.full((n_keep, 2), np.nan, dtype=float)  # [mu_h,phi_h]
 
     n_reject = 0
-    k_count = 0
+    k = 0
 
-   # GIBBS LOOP
     for it in range(max_iter):
 
-        #compute theta vector (esscher)
-        params_for_theta = {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0}
+        # ---- CURRENT STATE (annual params used for pricing/theta) ----
+        params_cur = {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0}
+
+        # theta only needs to be valid in-window; fill full vector for get_asset_path indexing
+        theta_full = np.full_like(rf_series, np.nan, dtype=float)
         try:
-            theta_series = update_theta_series(params_for_theta, rf)
-        except ValueError:
+            theta_full[mask] = update_theta_series(params_cur, rf_series[mask])
+        except Exception:
+            # current state should almost never fail if your constraints are correct
             n_reject += 1
             continue
 
-        # Asset extraction
-        A_path = np.empty(n, dtype=float)
-        for t in range(n):
-            T_rem = T0 - t * h  # in years
-            params_t = {"alpha": alpha, "beta1": beta1, "delta": delta, "beta0": beta0, "theta": float(theta_series[t])}
+        # E-step-like deterministic latent A_t under current params
+        A_path = get_asset_path(
+            params=params_cur,
+            theta_series=theta_full,
+            dates=dates,
+            E_series=E_series,
+            L_series=L_series,      # same convention as EM (your discounted proxy)
+            start_date=start_date,
+            end_date=end_date,
+        )
 
-            L_disc = L_face * float(np.exp(-rf[t] * T_rem))
-            A_path[t] = invert_nig_call_price(
-                E_obs=float(E[t]),
-                L=float(L_disc),
-                L_face=float(L_face),
-                T=float(T_rem),
-                params=params_t,
-            )
+        rA = np.diff(np.log(A_path))  # daily returns
+        if not np.all(np.isfinite(rA)):
+            n_reject += 1
+            continue
 
-        #compute asset log returns
-        rA = np.diff(np.log(A_path))  # length n-1
+        # ---- store a consistent draw BEFORE updating params ----
+        if keep_mask[it]:
+            A_draws[k, :] = A_path
+            theta_draws[k, :] = theta_full[mask]
+            params_draws[k, :] = np.array([alpha, beta1, delta, beta0], dtype=float)
+            mu_phi_draws[k, :] = np.array([mu_h, phi_h], dtype=float)
 
-        # sample z | r
-        z = sample_z_posterior(rA, {"alpha": alpha, "delta": delta, "beta0": beta0}, rng)
+        # ---- Gibbs updates on DAILY scale ----
+        # z | r  (use daily delta_h and daily beta0_h)
+        delta_h = delta * h
+        beta0_h = beta0 * h
+        z = sample_z_posterior(
+            rA,
+            {"alpha": alpha, "delta": delta_h, "beta0": beta0_h},
+            rng
+        )
 
-        # sample (mu,phi) | z
+        # mu_h, phi_h | z  (already daily objects)
         try:
-            mu_new, phi_new = sample_mu_phi(z, phi_current=phi, hyper=hyper, rng=rng)
+            mu_h_new, phi_h_new = sample_mu_phi(z, phi_current=phi_h, hyper=hyper, rng=rng)
         except Exception:
-            mu_new, phi_new = mu, phi  #fallback: keep
+            mu_h_new, phi_h_new = mu_h, phi_h
 
-        # sample (beta0,beta1) | r,z
+        # (beta0_h, beta1) | r, z
         try:
-            beta0_new, beta1_new = sample_beta(rA, z, b0_prior, B0_prior, rng)
+            beta0_h_new, beta1_new = sample_beta(rA, z, b0_prior, B0_prior, rng)
         except Exception:
-            beta0_new, beta1_new = beta0, beta1  # fallback: keep
+            beta0_h_new, beta1_new = beta0_h, beta1
 
-        # map back to (alpha,delta)
-        params_prop = params_from_mu_phi(mu_new, phi_new, beta0=beta0_new, beta1=beta1_new, theta=0.0)
+        # map back to ANNUAL params
+        try:
+            prop = params_from_mu_phi(mu_h_new, phi_h_new, beta0_h=beta0_h_new, beta1=beta1_new, h=h)
+            alpha_prop = float(prop["alpha"])
+            delta_prop = float(prop["delta"])
+            beta0_prop = float(prop["beta0"])
+        except Exception:
+            n_reject += 1
+            if keep_mask[it]:
+                z_draws[k, :] = z
+                k += 1
+            continue
 
-        #validate restrictions (NIG ans esscher-theta)
+        # feasibility checks: NIG + theta existence + pricing validity
         ok = True
-        alpha_prop = float(params_prop["alpha"])
-        delta_prop = float(params_prop["delta"])
-
-        if not (np.isfinite(alpha_prop) and np.isfinite(delta_prop) and np.isfinite(beta0_new) and np.isfinite(beta1_new)):
+        if not (np.isfinite(alpha_prop) and np.isfinite(delta_prop) and np.isfinite(beta0_prop) and np.isfinite(beta1_new)):
             ok = False
         if delta_prop <= 0.0 or alpha_prop <= 0.0 or abs(beta1_new) >= alpha_prop:
             ok = False
         if alpha_prop < 0.5:
             ok = False
         bound = delta_prop * np.sqrt(max(2.0 * alpha_prop - 1.0, 0.0))
-        if abs(beta0_new) > bound:
+        if abs(beta0_prop) > bound:
             ok = False
 
-        # also require that θ_t is computable for all rf in-window
+        # also require theta series computable in-window AND cdf-parameter feasibility
         if ok:
             try:
-                _ = update_theta_series(
-                    {"alpha": alpha_prop, "beta1": beta1_new, "delta": delta_prop, "beta0": beta0_new},
-                    rf,
+                theta_prop = update_theta_series(
+                    {"alpha": alpha_prop, "beta1": beta1_new, "delta": delta_prop, "beta0": beta0_prop},
+                    rf_series[mask],
                 )
+                # ensure NIG cdf parameters are valid for both beta+theta and beta+theta+1
+                alpha_floor = max(np.max(np.abs(beta1_new + theta_prop)),
+                                  np.max(np.abs(beta1_new + theta_prop + 1.0))) + 1e-6
+                if alpha_prop <= alpha_floor:
+                    ok = False
             except Exception:
                 ok = False
 
         if ok:
-            mu, phi = float(mu_new), float(phi_new)
-            beta0, beta1 = float(beta0_new), float(beta1_new)
-            alpha, delta = float(alpha_prop), float(delta_prop)
+            # accept new state
+            mu_h, phi_h = float(mu_h_new), float(phi_h_new)
+            beta1 = float(beta1_new)
+            alpha = float(alpha_prop)
+            delta = float(delta_prop)
+            beta0 = float(beta0_prop)
         else:
             n_reject += 1
 
-        # Store the draws and move to the next it
+        # store z aligned with stored draw
         if keep_mask[it]:
+            z_draws[k, :] = z
+            k += 1
 
-            A_draws[k_count, :] = A_path
-            theta_draws[k_count, :] = theta_series
-            z_draws[k_count, :] = z
-
-            params_draws[k_count, :] = np.array([alpha, beta1, delta, beta0], dtype=float)
-            mu_phi_mat[k_count, :] = np.array([mu, phi], dtype=float)
-
-            k_count += 1
+    # if some iterations were skipped, truncate to actual stored draws
+    A_draws = A_draws[:k, :]
+    theta_draws = theta_draws[:k, :]
+    z_draws = z_draws[:k, :]
+    params_draws = params_draws[:k, :]
+    mu_phi_draws = mu_phi_draws[:k, :]
 
     return {
-        "A_draws": A_draws,                 # (n_keep, n_days_in_window)
-        "Esscher-theta_series_draws": theta_draws,  # (n_keep, n_days_in_window)
-        "z_draws": z_draws,                 # (n_keep, n_days_in_window-1)
-        "Theta_draws": params_draws,           # (n_keep, 4) -> [alpha,beta1,delta,beta0]
-        "mu_phi_draws": mu_phi_mat,         # (n_keep, 2) -> [mu,phi]
+        "A_draws": A_draws,
+        "theta_draws": theta_draws,            # theta_t per stored draw (window)
+        "z_draws": z_draws,
+        "params_draws": params_draws,          # [alpha, beta1, delta, beta0] annual
+        "mu_phi_draws": mu_phi_draws,          # [mu_h, phi_h] daily
         "priors": {"hyper": hyper, "b0": b0_prior, "B0": B0_prior},
         "meta": {
             "burn_in": burn_in,
             "thin": thin,
             "max_iter": max_iter,
-            "n_keep": n_keep,
+            "n_keep_requested": n_keep,
+            "n_keep_actual": int(k),
             "n_reject": int(n_reject),
             "trading_days": trading_days,
-            "pd_horizon_years": pd_horizon_years,
-            "L_face_index": int(face_idx_full),
         },
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
