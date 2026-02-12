@@ -75,9 +75,13 @@ def nig_call_price(
     # NIG validity in paper parametrisation: |beta_shift| < alpha
     if abs(beta_plus) >= alpha or abs(beta_minus) >= alpha:
         return np.nan
+    
+    a = alpha*scale
+    b_plus = beta_plus*scale
+    b_minus = beta_minus*scale
 
-    tail_plus = norminvgauss.sf(x0, a=alpha, b=beta_plus,  loc=loc, scale=scale)
-    tail_minus = norminvgauss.sf(x0, a=alpha, b=beta_minus, loc=loc, scale=scale)
+    tail_plus = norminvgauss.sf(x0, a=a, b=b_plus,  loc=loc, scale=scale)
+    tail_minus = norminvgauss.sf(x0, a=a, b=b_minus, loc=loc, scale=scale)
 
     if discounting == "continuous":
         L_disc = float(L_face) * np.exp(-float(r) * float(T))
@@ -221,8 +225,9 @@ def _nig_negloglik_daily(r, alpha, beta, delta_annual, mu_annual, *, daycount=25
 
     loc = float(mu_annual) * h
     scale = max(float(delta_annual) * h, 1e-12)
-
-    ll = norminvgauss.logpdf(r, a=float(alpha), b=float(beta), loc=loc, scale=scale)
+    a = float(alpha) * scale
+    b = float(beta) * scale
+    ll = norminvgauss.logpdf(r, a=a, b=b, loc=loc, scale=scale)
     if not np.all(np.isfinite(ll)):
         return 1e50
 
@@ -457,7 +462,7 @@ def _compute_pd_with_beta(
     scale = float(delta) * float(T)      # δ_T
     loc   = float(beta0) * float(T)      # μ_T
 
-    pd = norminvgauss.cdf(x_thresh, a=float(alpha), b=float(beta), loc=loc, scale=scale)
+    pd = norminvgauss.cdf(x_thresh, a=float(alpha*scale), b=float(beta*scale), loc=loc, scale=scale)
     return float(pd)
 
 
