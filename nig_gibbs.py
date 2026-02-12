@@ -274,7 +274,7 @@ def gibbs_sampler(
             theta_series=theta_full,
             dates=dates,
             E_series=E_series,
-            L_series=L_series,      # same convention as EM (your discounted proxy)
+            L_face_series=L_series,      # same convention as EM (your discounted proxy)
             start_date=start_date,
             end_date=end_date,
         )
