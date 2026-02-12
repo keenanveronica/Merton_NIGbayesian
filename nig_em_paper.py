@@ -423,7 +423,7 @@ def compute_pd_risk_neutral(A0: float, L: float, T: float, params: Dict[str, flo
     )
 
 
-def one_year_pd_timeseries_from_em(
+def one_year_pd_timeseries(
     out: dict,
     L_series_full: np.ndarray
 ) -> pd.DataFrame:
@@ -455,12 +455,12 @@ def one_year_pd_timeseries_from_em(
             continue
 
         # physical PD
-        pd_p[i] = compute_pd_physical(A0=A0, L=Lh, T=1 params=params)
+        pd_p[i] = compute_pd_physical(A0=A0, L=Lh, T=1.0, params=params)
 
         # risk-neutral PD (needs theta_t)
         params_t = dict(params)
         params_t["theta"] = float(theta_win[i])
-        pd_q[i] = compute_pd_risk_neutral(A0=A0, L=Lh, T=1 params=params_t)
+        pd_q[i] = compute_pd_risk_neutral(A0=A0, L=Lh, T=1.0, params=params_t)
 
     return pd.DataFrame({
         "date": dates_win,
