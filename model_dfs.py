@@ -294,9 +294,10 @@ def prepare_merton_inputs(
     )
 
     # 2) build discounted liabilities per firm-year
+    df_cal = market[["date"]].drop_duplicates().sort_values("date").reset_index(drop=True)
     debt_daily = fill_liabilities(
         bs=bs,
-        df_rf=df_rf,
+        df_rf=df_cal,
         debt_col="liabilities_total",
         publication_col="final_date",
         gvkey_col="gvkey",
@@ -359,9 +360,10 @@ def prepare_nig_inputs(
     )
 
     # 2) build discounted liabilities per firm-year
+    df_cal = market[["date"]].drop_duplicates().sort_values("date").reset_index(drop=True)
     debt_daily = fill_liabilities(
         bs=bs,
-        df_rf=df_rf,
+        df_rf=df_cal,
         debt_col="liabilities_total",
         publication_col="final_date",
         gvkey_col="gvkey",

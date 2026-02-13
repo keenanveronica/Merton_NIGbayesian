@@ -59,7 +59,6 @@ def params_from_mu_phi(
     }
 
 
-
 def sample_gig(
     lam: float, chi: float, psi: float, rng: np.random.Generator
 ) -> float:
@@ -163,9 +162,6 @@ def sample_beta(
 
     beta_draw = multivariate_normal.rvs(mean=b_mean, cov=B_new, random_state=rng)
     return float(beta_draw[0]), float(beta_draw[1])
-
-
-from typing import Any
 
 def gibbs_sampler(
     E_series: np.ndarray,
