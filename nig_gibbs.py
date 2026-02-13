@@ -149,7 +149,7 @@ def sample_beta(
     X = np.column_stack([np.ones(T), z])  # (T,2)
 
     # weights: Σ_z^{-1} = diag(1/z_t)
-    w = 1.0 / z  # (T,)
+    w = 1.0 / np.maximum(z,1e-12)  # (T,)
 
     B0_inv = np.linalg.inv(np.asarray(B0, dtype=float))
     XtW = X.T * w  # (2,T)
@@ -272,6 +272,7 @@ def gibbs_sampler(
         A_path = get_asset_path(
             params=params_cur,
             theta_series=theta_full,
+            rf_series=rf_series,
             dates=dates,
             E_series=E_series,
             L_face_series=L_series,      # same convention as EM (your discounted proxy)
