@@ -75,7 +75,7 @@ def nig_call_price(
     # NIG validity in paper parametrisation: |beta_shift| < alpha
     if abs(beta_plus) >= alpha or abs(beta_minus) >= alpha:
         return np.nan
-    
+
     a = alpha*scale
     b_plus = beta_plus*scale
     b_minus = beta_minus*scale
