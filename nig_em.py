@@ -3,7 +3,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import norminvgauss
 import warnings
-from nig_old.nig_base import get_asset_path, update_theta
+from nig_base import get_asset_path, update_theta
 
 
 def _nig_negloglik_daily(
