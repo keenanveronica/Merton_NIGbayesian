@@ -208,3 +208,45 @@ def one_year_pd_timeseries(out: dict, L_face_series_full: np.ndarray) -> pd.Data
         "PD_physical": pd_p,
         "PD_risk_neutral": pd_q,
     })
+
+
+def compute_pd_physical_vec(A0, L, T, alpha, beta1, delta, beta0, warn=False):
+    """
+    Vectorized physical PD under NIG.
+    Inputs can be arrays (same length).
+    Uses the same mapping as the scalar compute_pd_physical:
+      X_T ~ NIG(alpha, beta1, delta*T, beta0*T)
+      PD = P( X_T <= log(L/A0) )
+    """
+    A0 = np.asarray(A0, dtype=float)
+    L = np.asarray(L, dtype=float)
+    alpha = np.asarray(alpha, dtype=float)
+    beta1 = np.asarray(beta1, dtype=float)
+    delta = np.asarray(delta, dtype=float)
+    beta0 = np.asarray(beta0, dtype=float)
+
+    # feasibility mask
+    ok = (
+        np.isfinite(A0) & (A0 > 0) &
+        np.isfinite(L) & (L > 0) &
+        np.isfinite(alpha) & (alpha > 0) &
+        np.isfinite(delta) & (delta > 0) &
+        np.isfinite(beta1) & (np.abs(beta1) < alpha) &
+        np.isfinite(beta0)
+    )
+
+    out = np.full(A0.shape, np.nan, dtype=float)
+    if not np.any(ok):
+        return out
+
+    x = np.log(L[ok] / A0[ok])
+
+    # SciPy parameterization: (a, b, loc, scale)
+    # where a = alpha*scale, b = beta*scale
+    scale = delta[ok] * T
+    loc = beta0[ok] * T
+    a = alpha[ok] * scale
+    b = beta1[ok] * scale
+
+    out[ok] = norminvgauss.cdf(x, a=a, b=b, loc=loc, scale=scale)
+    return out
