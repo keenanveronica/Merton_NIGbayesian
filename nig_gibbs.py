@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict, Tuple, Optional
 from scipy.stats import geninvgauss, gamma, multivariate_normal
-from nig_old.nig_em_paper import update_theta_series, get_asset_path
+from nig_em_paper import update_theta_series, get_asset_path
 from typing import Any
 
 
