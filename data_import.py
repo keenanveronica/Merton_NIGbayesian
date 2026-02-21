@@ -231,7 +231,7 @@ def load_data(
 def load_ecb_1y_yield(
     startPeriod="2010-01-01",
     endPeriod="2025-12-31",
-    out_file="ecb_yc_1y_aaa.xml",
+    out_file="data/derived/ecb_yc_1y_aaa.xml",
     verify_ssl=False,
     return_response=False
 ):
@@ -253,6 +253,7 @@ def load_ecb_1y_yield(
     response = requests.get(url, headers=headers, params=params, verify=verify_ssl)
 
     if response.status_code == 200:
+        Path(out_file).parent.mkdir(parents=True, exist_ok=True)
         with open(out_file, "wb") as file:
             file.write(response.content)
         print(f"Data has been written to {out_file}")
