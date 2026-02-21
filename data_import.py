@@ -653,12 +653,6 @@ def make_em_inputs(
     use_filled_L: bool = True,
     L_pick: str = "last",   # "last" is the most natural for 'as-of end of window'
 ) -> tuple[np.ndarray, float, np.ndarray]:
-    """
-    Extract (equity_array, L_scalar, rf_array) in the exact shape expected by
-    nig_em_paper.em_init_nig_params(...) :contentReference[oaicite:2]{index=2}
-
-    window=505 matches the empirical setup in Jovan & Ahčan :contentReference[oaicite:3]{index=3}
-    """
     df = nig_panel.copy()
     df["gvkey"] = df["gvkey"].astype(str)
     df = df[df["gvkey"] == str(gvkey)].sort_values("date")
