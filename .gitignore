@@ -9,13 +9,6 @@ __pycache__/
 env/
 .conda/
 
-# Data (DO NOT COMMIT)
-data/
-*.csv
-*.xlsx
-*.parquet
-*.pkl
-
 # Outputs
 outputs/
 results/
