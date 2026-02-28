@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import norminvgauss
-from nig_apath import NIGParams
+from NIG_weekly.nig_apath import NIGParams
 
 
 def pd_terminal_nig_weekly(

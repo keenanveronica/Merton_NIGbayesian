@@ -2,11 +2,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.special import kve
-from nig_apath import NIGParams, solve_esscher_theta
+from NIG_weekly.nig_apath import NIGParams, solve_esscher_theta
 
-
-
-# Helpers: model moments + projections
 
 def nig_var_one_step(p: NIGParams) -> float:
     """
@@ -50,9 +47,7 @@ def project_mu_to_sample_mean(p: NIGParams, sample_mean: float) -> NIGParams:
     return NIGParams(alpha=p.alpha, beta=p.beta, delta=p.delta, mu=mu_star)
 
 
-
 # Theta-aware feasibility (computed inside the loop)
-
 def _compute_theta_window(
     p: NIGParams,
     r_win: np.ndarray,

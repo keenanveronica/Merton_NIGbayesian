@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from data_import import (
+from data.data_import import (
     load_data, load_ecb_1y_yield,
     fill_liabilities, drop_high_leverage_firms,
     prepare_merton_inputs
