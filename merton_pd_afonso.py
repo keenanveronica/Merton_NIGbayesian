@@ -21,10 +21,10 @@ def merton_dd(V, B_T, drift, sigma_V, T=1.0):
         return np.nan
     if np.any(V <= 0) or np.any(B_T <= 0) or np.any(sigma_V <= 0):
         return np.nan
-    
+
     T = float(T)
     if T <= 0:
-        raise ValueError("T must be > 0 (years).")    
+        raise ValueError("T must be > 0 (years).")
 
     eps = 1e-14
     V = np.maximum(V, eps)

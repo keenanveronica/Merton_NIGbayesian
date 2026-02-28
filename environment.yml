@@ -7,4 +7,7 @@ dependencies:
   - pip
   - ipykernel
   - numpy
+  - matplotlib
+  - scipy
+  - tqdm
 prefix: C:\Users\vkeenan\AppData\Local\miniconda3\envs\Accenture
