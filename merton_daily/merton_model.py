@@ -6,7 +6,7 @@ from data_import import (
     fill_liabilities, drop_high_leverage_firms,
     prepare_merton_inputs
 )
-from merton_calibration import calibrate_merton_panel, add_physical_pd_from_implied_assets
+from merton_daily.merton_calibration import calibrate_merton_panel, add_physical_pd_from_implied_assets
 
 # data loading and initial processing
 ret_daily, bs, coverage = load_data(
