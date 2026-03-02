@@ -22,7 +22,7 @@ ret_daily, bs, coverage = load_data(
 df_rf = load_ecb_1y_yield(
     startPeriod="2010-01-01",
     endPeriod="2025-12-31",
-    out_file="ecb_yc_1y_aaa.xml",
+    out_file="data/raw/ecb_yc_1y_aaa.xml",
     verify_ssl=True,  # recommended if it works
 )
 
