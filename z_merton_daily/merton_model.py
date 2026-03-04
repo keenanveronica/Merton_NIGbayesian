@@ -14,7 +14,7 @@ ret_daily, bs, coverage = load_data(
     start_date="2012-01-01",
     end_date="2025-12-19",
     enforce_coverage=True,
-    coverage_tol=0.95,
+    coverage_tol=0.995,
     liabilities_scale="auto",
     verbose=True,
 )
