@@ -4,7 +4,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 import pandas as pd
-from data_import import load_data
+from pd_estim_A.data.data_import import load_data
 
 
 def _norm_name(s: str) -> str:
@@ -54,12 +54,12 @@ def get_cds_panel(
     root = Path(project_root) if project_root is not None else Path.cwd()
 
     if accenture_xlsx is None:
-        accenture_xlsx = root / "raw" / "Jan2025_Accenture_Dataset_ErasmusCase.xlsx"
+        accenture_xlsx = root / "data" / "raw" / "Jan2025_Accenture_Dataset_ErasmusCase.xlsx"
     else:
         accenture_xlsx = Path(accenture_xlsx)
 
     if cds_xlsx is None:
-        cds_xlsx = root / "raw" / "CDS_data_raw.xlsx"
+        cds_xlsx = root / "data" / "raw" / "CDS_data_raw.xlsx"
     else:
         cds_xlsx = Path(cds_xlsx)
 
