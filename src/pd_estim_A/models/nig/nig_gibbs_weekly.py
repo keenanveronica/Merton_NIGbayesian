@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Optional, Any
 from scipy.stats import geninvgauss, gamma, multivariate_normal
-from NIG_weekly.nig_apath import NIGParams, invert_asset_one_date, solve_esscher_theta
+from pd_estim_A.models.nig.nig_apath import NIGParams, invert_asset_one_date, solve_esscher_theta
 
 
 # Helpers: IG-mixture parameter mappings (your originals, but "step" not "daily")

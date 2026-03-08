@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from NIG_weekly.nig_apath import call_nig_with_theta, NIGParams
+from pd_estim_A.models.nig.nig_apath import call_nig_with_theta, NIGParams
 
 
 # Helpers

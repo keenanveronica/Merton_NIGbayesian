@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.special import kve
-from NIG_weekly.nig_apath import NIGParams, solve_esscher_theta
+from pd_estim_A.models.nig.nig_apath import NIGParams, solve_esscher_theta
 
 
 def nig_var_one_step(p: NIGParams) -> float:

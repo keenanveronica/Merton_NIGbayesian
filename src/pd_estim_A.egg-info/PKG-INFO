@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: pd-estim-A
+Version: 0.1.0
+Summary: Structural credit risk models: Merton and NIG extension
+Requires-Python: >=3.10
