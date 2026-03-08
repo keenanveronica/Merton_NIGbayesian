@@ -81,6 +81,7 @@ This repo extends that framework using a **Normal Inverse Gaussian (NIG) Lévy p
 ├── environment.yml
 ├── pyproject.toml
 └── README.md
+```
 ---
 
 ## Setup (Conda)
