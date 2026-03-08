@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
-
 import pandas as pd
-
 from data_import import load_data
 
 
@@ -97,7 +94,9 @@ def get_cds_panel(
     )
     firm_ref["gvkey"] = firm_ref["gvkey"].astype(str)
     firm_ref["company_norm"] = firm_ref["company"].map(_norm_name)
-    firm_ref = firm_ref.groupby(["gvkey", "company_norm"], as_index=False).agg(company=("company", "first"))
+    firm_ref = firm_ref.groupby(
+        ["gvkey", "company_norm"], as_index=False
+    ).agg(company=("company", "first"))
 
     norm_to_gv = (
         firm_ref.groupby("company_norm")["gvkey"]

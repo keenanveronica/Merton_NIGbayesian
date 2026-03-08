@@ -1,11 +1,10 @@
 import numpy as np
-import pandas as pd
 from typing import Dict, Tuple, Optional, Any
 from scipy.stats import geninvgauss, gamma, multivariate_normal
 from pd_estim_A.models.nig.nig_apath import NIGParams, invert_asset_one_date, solve_esscher_theta
 
 
-# Helpers: IG-mixture parameter mappings (your originals, but "step" not "daily")
+# Helpers
 def mu_phi_from_params(params: Dict[str, float], h_step: float) -> Tuple[float, float]:
     """
     Map 'per-unit' NIG params -> (mu_h, phi_h) for the mixing IG at step length h_step
@@ -18,7 +17,7 @@ def mu_phi_from_params(params: Dict[str, float], h_step: float) -> Tuple[float, 
       phi_h = delta_h * gamma
     """
     alpha = float(params.get("alpha", 0.0))
-    beta  = float(params.get("beta", 0.0))
+    beta = float(params.get("beta", 0.0))
     delta = float(params.get("delta", 0.0))
 
     if delta <= 0.0 or alpha <= 0.0 or abs(beta) >= alpha:
@@ -75,7 +74,7 @@ def sample_z_posterior(returns: np.ndarray, params: Dict[str, float], rng: np.ra
     """
     alpha = float(params["alpha"])
     delta = float(params["delta"])
-    mu0   = float(params["mu"])
+    mu0 = float(params["mu"])
     alpha2 = alpha * alpha
 
     z = np.empty_like(returns, dtype=float)
@@ -114,13 +113,13 @@ def sample_mu_phi(
     u3 = Tn * zbar_r + omega / max(eta, 1e-12)
     v = Tn + 2.0 * xi
 
-    # mu | z,phi ~ GIG(...)
+    # mu
     lam_mu = (Tn - 1.0) / 2.0
     a_mu2 = float(phi_current * u1)
     b_mu2 = float(phi_current * u3)
     mu_new = sample_gig(lam_mu, a_mu2, b_mu2, rng)
 
-    # phi | z,mu ~ Gamma(...)
+    # phi
     shape_phi = (v + 1.0) / 2.0
     rate_phi = u1/(2.0 * mu_new) - u2 + (u3*mu_new)/2.0
     rate_phi = max(float(rate_phi), 1e-12)
@@ -146,14 +145,14 @@ def sample_beta_mu0(
         raise ValueError("returns and z must have the same length")
 
     T = r.size
-    X = np.column_stack([np.ones(T), z])     # (T,2)
+    X = np.column_stack([np.ones(T), z])
     w = 1.0 / np.maximum(z, 1e-12)          # diag weights
 
     B0 = np.asarray(B0, dtype=float)
     b0 = np.asarray(b0, dtype=float).reshape(2, 1)
 
     B0_inv = np.linalg.inv(B0)
-    XtW = X.T * w                           # (2,T)
+    XtW = X.T * w
 
     B_new_inv = XtW @ X + B0_inv
     B_new = np.linalg.inv(B_new_inv)
@@ -167,9 +166,8 @@ def sample_beta_mu0(
     return mu0_step, beta
 
 
-# -----------------------------
+
 # Weekly theta + asset inversion inside Gibbs
-# -----------------------------
 def annual_cc_rate_to_weekly(r_annual: np.ndarray, weeks_per_year: int = 52) -> np.ndarray:
     """
     Convert annual continuously-compounded rate to weekly continuously-compounded rate.
@@ -220,9 +218,8 @@ def invert_assets_on_dates(
     return A, th
 
 
-# -----------------------------
+
 # Main Gibbs sampler (weekly)
-# -----------------------------
 def gibbs_sampler_weekly(
     E_series: np.ndarray,
     L_series: np.ndarray,        # should be FACE VALUE strike used in pricing (not already-discounted)
@@ -257,7 +254,7 @@ def gibbs_sampler_weekly(
     if thin <= 0:
         raise ValueError("thin must be >= 1")
 
-    # --- window mask ---
+    # window mask
     mask = np.ones(dates.size, dtype=bool)
     if start_date is not None:
         mask &= (dates >= start_date)
@@ -273,18 +270,18 @@ def gibbs_sampler_weekly(
     Lw = L_series[mask]
     rw_week = annual_cc_rate_to_weekly(rf_series_annual_cc[mask], weeks_per_year=weeks_per_year)
 
-    # 1 year expressed in "weeks" (because we treat params as weekly increments)
+    # 1 year expressed in "weeks" (treat params as weekly increments)
     tau_weeks = float(tau_years) * float(weeks_per_year)
 
     n_obs = int(idx.size)
 
-    # --- EM init (WEEKLY params) ---
+    # EM init
     alpha = float(em_params["alpha"])
     beta  = float(em_params["beta"])
     delta = float(em_params["delta"])
     mu0   = float(em_params["mu"])
 
-    # step-length in the SAME units as params: weekly step => h_step = 1
+    # weekly step => h_step = 1
     h_step = 1.0
 
     # convert weekly NIG -> IG-mix params (mu_h, phi_h) at step
@@ -303,28 +300,28 @@ def gibbs_sampler_weekly(
         "omega": 0.001,
     }
 
-    # --- storage plan ---
+    # storage plan
     keep_mask = np.zeros(max_iter, dtype=bool)
     for it in range(max_iter):
         if it >= burn_in and ((it - burn_in) % thin == 0):
             keep_mask[it] = True
     n_keep = int(keep_mask.sum())
 
-    A_draws      = np.full((n_keep, n_obs), np.nan, dtype=float)
-    theta_draws  = np.full((n_keep, n_obs), np.nan, dtype=float)
-    z_draws      = np.full((n_keep, n_obs - 1), np.nan, dtype=float)
+    A_draws = np.full((n_keep, n_obs), np.nan, dtype=float)
+    theta_draws = np.full((n_keep, n_obs), np.nan, dtype=float)
+    z_draws = np.full((n_keep, n_obs - 1), np.nan, dtype=float)
 
-    # store BOTH weekly-step params and annualized (for reporting)
+    # store both weekly-step params and annualized
     params_weekly = np.full((n_keep, 4), np.nan, dtype=float)  # [alpha,beta,delta,mu]
     params_annual = np.full((n_keep, 4), np.nan, dtype=float)  # [alpha,beta,delta*52,mu*52]
-    mu_phi_draws  = np.full((n_keep, 2), np.nan, dtype=float)  # [mu_h,phi_h]
+    mu_phi_draws = np.full((n_keep, 2), np.nan, dtype=float)  # [mu_h,phi_h]
 
     n_reject = 0
     k = 0
 
     for it in range(max_iter):
 
-        # current NIG params object (weekly-step)
+        # current NIG params object
         p_cur = NIGParams(alpha=alpha, beta=beta, delta=delta, mu=mu0)
 
         # invert weekly assets under current params
@@ -354,7 +351,7 @@ def gibbs_sampler_weekly(
             params_annual[k, :] = np.array([alpha, beta, delta * weeks_per_year, mu0 * weeks_per_year], dtype=float)
             mu_phi_draws[k, :] = np.array([mu_h, phi_h], dtype=float)
 
-        # ---- Gibbs updates (weekly-step) ----
+        # Gibbs updates
         # z | r  (weekly-step delta and mu)
         z = sample_z_posterior(rA, {"alpha": alpha, "delta": delta, "mu": mu0}, rng)
 
@@ -374,9 +371,9 @@ def gibbs_sampler_weekly(
         try:
             prop = params_from_mu_phi(mu_h_new, phi_h_new, mu0_h=mu0_new, beta=beta_new, h_step=h_step)
             alpha_prop = float(prop["alpha"])
-            beta_prop  = float(prop["beta"])
+            beta_prop = float(prop["beta"])
             delta_prop = float(prop["delta"])
-            mu_prop    = float(prop["mu"])
+            mu_prop = float(prop["mu"])
         except Exception:
             n_reject += 1
             if keep_mask[it]:
@@ -416,12 +413,12 @@ def gibbs_sampler_weekly(
             k += 1
 
     # truncate to actual stored draws
-    A_draws     = A_draws[:k, :]
+    A_draws = A_draws[:k, :]
     theta_draws = theta_draws[:k, :]
-    z_draws     = z_draws[:k, :]
+    z_draws = z_draws[:k, :]
     params_weekly = params_weekly[:k, :]
     params_annual = params_annual[:k, :]
-    mu_phi_draws  = mu_phi_draws[:k, :]
+    mu_phi_draws = mu_phi_draws[:k, :]
 
     return {
         "A_draws": A_draws,

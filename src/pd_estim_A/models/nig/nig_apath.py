@@ -50,9 +50,9 @@ def solve_esscher_theta(p: NIGParams, r: float, tau: float) -> float:
     # 1) |b + theta|   < a  ->  -a - b < theta < a - b
     # 2) |b + theta+1| < a  ->  -a - b - 1 < theta < a - b - 1
     lo = max(-a - b, -a - b - 1.0)
-    hi = min( a - b,  a - b - 1.0)
+    hi = min(a - b,  a - b - 1.0)
 
-    # stay away from boundary to avoid numerical blowups
+    # stay away from boundary
     eps = 1e-10
     lo += eps
     hi -= eps
@@ -63,7 +63,6 @@ def solve_esscher_theta(p: NIGParams, r: float, tau: float) -> float:
         return (nig_kappa(th + 1.0, p, tau) - nig_kappa(th, p, tau)).real - (r * tau)
 
     # Evaluate g on a small grid to find a sign change
-    # (more robust than hoping endpoints bracket)
     grid = np.linspace(lo, hi, 41)
     vals = np.array([g(t) for t in grid], dtype=float)
 
@@ -73,8 +72,7 @@ def solve_esscher_theta(p: NIGParams, r: float, tau: float) -> float:
         if np.isfinite(f0) and np.isfinite(f1) and (f0 * f1 < 0):
             return float(brentq(g, grid[i], grid[i + 1], maxiter=200))
 
-    # If no sign change, it's either genuinely no-root, or numerically flat.
-    # You can choose to fail, or return the minimizer of |g| as a fallback.
+    # If no sign change, it's either no-root or numerically flat
     j = int(np.nanargmin(np.abs(vals)))
     th_best = float(grid[j])
     raise RuntimeError(

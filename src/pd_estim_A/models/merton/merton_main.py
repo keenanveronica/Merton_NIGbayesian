@@ -97,7 +97,7 @@ def invert_asset_one_week_merton(E_obs, B, r, T, sigmaV, *, V_prev=None, tol=1e-
     V_hat = float(brentq(f, lo, hi, xtol=tol, rtol=tol, maxiter=maxiter))
     Emod, d1, d2, _ = merton_equity_from_assets(V_hat, B, r, T, sigmaV)
 
-    # light sanity: call value cannot exceed underlying
+    # call value cannot exceed underlying
     if Emod > V_hat + 1e-8:
         raise RuntimeError("sanity check failed: E_model > V")
 
@@ -113,14 +113,13 @@ def invert_assets_weekly_for_firm_merton(
     B_col: str = "B_used",
     r_col: str = "r",
     T_col: str = "T",
-    dates: pd.DatetimeIndex | None = None,      # NEW
-    g_indexed: pd.DataFrame | None = None,      # NEW (date-indexed, deduped)
+    dates: pd.DatetimeIndex | None = None,
+    g_indexed: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     DAILY input -> WEEKLY output (last trading day each week):
     returns weekly V_hat path + d1,d2 + logV + dlogV.
     """
-    #NEW: allow cached preprocessing (saves a lot of time inside sigma-iterations)
     if g_indexed is None:
         g = g.sort_values("date").copy()
         g["date"] = pd.to_datetime(g["date"])
@@ -148,9 +147,9 @@ def invert_assets_weekly_for_firm_merton(
 
         row = g.loc[d]
         E_obs = float(row[E_col])
-        B     = float(row[B_col])
-        r     = float(row[r_col])
-        T     = float(row[T_col])
+        B = float(row[B_col])
+        r = float(row[r_col])
+        T = float(row[T_col])
 
         V_hat, d1, d2 = invert_asset_one_week_merton(
             E_obs, B, r, T, sigmaV,
@@ -202,7 +201,7 @@ def calibrate_sigmaV_window_weekly_merton(
     B_col: str = "B_used",
     r_col: str = "r",
     T_col: str = "T",
-    sigmaE_col: str = "sigma_E",   # optional seed only
+    sigmaE_col: str = "sigma_E",
 ):
     """
     Estimate ONE constant sigmaV (annualized) for this 2-year window,
@@ -216,7 +215,7 @@ def calibrate_sigmaV_window_weekly_merton(
     for c in [E_col, B_col, r_col, T_col]:
         w[c] = pd.to_numeric(w[c], errors="coerce")
 
-    # NEW: cache weekly calendar + date-indexed daily panel ONCE
+    # cache weekly calendar + date-indexed daily panel once
     dates_cached = build_weekly_calendar_from_panel(w, week_ending=week_ending)
     w_indexed = (
         w.dropna(subset=["date"])
@@ -242,7 +241,7 @@ def calibrate_sigmaV_window_weekly_merton(
 
     for it in range(max_iter):
         try:
-            # NEW (A): pass cached dates + indexed panel to avoid recomputation
+            # pass cached dates + indexed panel to avoid recomputation
             weekly = invert_assets_weekly_for_firm_merton(
                 w,
                 sigmaV=sigmaV,
@@ -308,7 +307,7 @@ def calibrate_merton_quarterly_rolling_weekly_output(
     T_col: str = "T",
     T_default: float = 1.0,
     B_scale: float = 1.0,
-    sigmaE_col: str = "sigma_E",  # optional seed only
+    sigmaE_col: str = "sigma_E",
 ):
     """
     For each firm (gvkey):
@@ -332,7 +331,7 @@ def calibrate_merton_quarterly_rolling_weekly_output(
     for c in [E_col, B_col, r_col, T_col]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # scaled debt column like your previous code
+    # scaled debt column
     df["B_used"] = df[B_col].astype(float) * float(B_scale)
     df["B_scale_used"] = float(B_scale)
 
@@ -353,7 +352,7 @@ def calibrate_merton_quarterly_rolling_weekly_output(
         last_sigma = None
 
         for q_end in q_ends:
-            # pick actual end_date as last available trading date <= quarter end
+            # pick actual end_date as last available trading date
             mask_end = dates <= q_end
             if not mask_end.any():
                 continue

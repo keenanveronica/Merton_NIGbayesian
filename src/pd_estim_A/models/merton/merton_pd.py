@@ -2,9 +2,11 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
+
 # helpers
 def _norm_cdf(x):
     return ndtr(np.asarray(x, dtype=float))
+
 
 def merton_dd(V, B_T, drift, sigma_V, T=1.0):
     """
@@ -16,7 +18,7 @@ def merton_dd(V, B_T, drift, sigma_V, T=1.0):
     drift = np.asarray(drift, dtype=float)
     sigma_V = np.asarray(sigma_V, dtype=float)
 
-    # hard validity (avoid silently masking bad inputs)
+    # hard validity
     if np.any(~np.isfinite(V)) or np.any(~np.isfinite(B_T)) or np.any(~np.isfinite(drift)) or np.any(~np.isfinite(sigma_V)):
         return np.nan
     if np.any(V <= 0) or np.any(B_T <= 0) or np.any(sigma_V <= 0):

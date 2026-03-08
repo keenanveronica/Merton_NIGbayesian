@@ -26,7 +26,7 @@ def _infer_param_cols(df: pd.DataFrame):
     raise ValueError("Cannot infer parameter columns (alpha/beta/delta/mu or p_alpha/p_beta/p_delta/p_mu).")
 
 
-# (i) Equity reconstruction errors vs leverage
+# Equity reconstruction errors vs leverage
 def check_equity_reconstruction_errors(
     assets_weekly_all: pd.DataFrame,
     *,
@@ -51,10 +51,10 @@ def check_equity_reconstruction_errors(
     if use_theta_col is None or use_theta_col not in df.columns:
         raise ValueError("Equity reconstruction check needs a theta column (set use_theta_col='theta').")
 
-    acol,bcol,dcol,mcol = _infer_param_cols(df)
+    acol, bcol, dcol, mcol = _infer_param_cols(df)
     df["date"] = _to_dt(df["date"])
 
-    # compute E_model pointwise (not vectorized; still fine for ~26k rows)
+    # compute E_model pointwise
     E_model = np.empty(len(df), dtype=float)
     E_model[:] = np.nan
 
@@ -77,12 +77,12 @@ def check_equity_reconstruction_errors(
     df["E_rel_err"] = df["E_abs_err"] / (df["E"].abs() + 1e-12)
     df["log_lev"] = np.log((df["A_hat"] + 1e-18) / (df["L"] + 1e-18))
 
-    summ = df["E_rel_err"].abs().describe(percentiles=[0.5,0.9,0.95,0.99,0.999])
+    summ = df["E_rel_err"].abs().describe(percentiles=[0.5, 0.9, 0.95, 0.99, 0.999])
     share_bad = (df["E_rel_err"].abs() > max_abs_rel_err_warn).mean()
 
     # error in high leverage states (close to default): low log(A/L)
     high_lev = df["log_lev"] < np.nanpercentile(df["log_lev"], 10)
-    summ_high_lev = df.loc[high_lev, "E_rel_err"].abs().describe(percentiles=[0.5,0.9,0.95,0.99])
+    summ_high_lev = df.loc[high_lev, "E_rel_err"].abs().describe(percentiles=[0.5, 0.9, 0.95, 0.99])
 
     out = {
         "summary_abs_rel_error": summ,
@@ -107,7 +107,7 @@ def check_equity_reconstruction_errors(
     return out
 
 
-# (ii) Tail outliers in implied asset returns (dlogA)
+# Tail outliers in implied asset returns (dlogA)
 def check_asset_return_outliers(
     assets_weekly_all: pd.DataFrame,
     *,
@@ -175,7 +175,7 @@ def check_asset_return_outliers(
     return {"per_firm": rows, "summary": summary, "worst_firms": worst}
 
 
-# (iii) Artificial jumps at refit dates (params + PD)
+# Artificial jumps at refit dates (params + PD)
 def check_refit_date_jumps(
     pds_weekly_all: pd.DataFrame,
     updates_all: pd.DataFrame,
@@ -236,7 +236,7 @@ def check_refit_date_jumps(
     return out
 
 
-# (iv) Stability under small perturbations (rerun vs baseline)
+# Stability under small perturbations (rerun vs baseline)
 def compare_two_pd_panels(
     pd_base: pd.DataFrame,
     pd_alt: pd.DataFrame,

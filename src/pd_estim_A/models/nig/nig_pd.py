@@ -1,4 +1,3 @@
-# nig_pd.py
 import numpy as np
 import pandas as pd
 from scipy.stats import norminvgauss
@@ -41,7 +40,7 @@ def pd_terminal_nig_weekly(
     a = p.alpha * delta_T
     b = p.beta * delta_T
 
-    # basic safety: scipy requires a>0 and |b|<a
+    # scipy requires a>0 and |b|<a
     if not np.isfinite(a) or not np.isfinite(b) or a <= 0 or abs(b) >= a:
         return np.nan
 
@@ -83,8 +82,7 @@ def pd_weekly_one_firm(
     if missing_u:
         raise ValueError(f"param_updates missing columns: {sorted(missing_u)}")
 
-    # Build a forward-filled parameter schedule aligned to weekly dates:
-    # for each weekly date, pick the most recent update <= date; if none, fall back to p0.
+    # Build a forward-filled parameter schedule aligned to weekly dates
     sched = pd.merge_asof(
         df[["date"]].sort_values("date"),
         upd[["date", "alpha", "beta", "delta", "mu"]].sort_values("date"),
@@ -100,7 +98,7 @@ def pd_weekly_one_firm(
 
     out = df.merge(sched, on="date", how="left")
 
-    # Vectorized PD computation (same formula as pd_terminal_nig_weekly)
+    # Vectorized PD computation
     A = out["A_hat"].to_numpy(float)
     L = out["L"].to_numpy(float)
     alpha = out["alpha"].to_numpy(float)
