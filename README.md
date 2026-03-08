@@ -1,5 +1,3 @@
-# Merton_NIGbayesian (team README)
-
 # Merton_NIGbayesian
 
 Structural credit-risk project for the Accenture / Erasmus School of Economics case study on extending the classical Merton model to address the non-normality of asset returns.
