@@ -34,50 +34,55 @@ def nig_kappa(u, p: NIGParams, tau: float):
     return (m * u + d * (term0 - term1)) * tau
 
 
-def solve_esscher_theta(p: NIGParams, r: float, tau: float) -> float:
+def solve_esscher_theta(
+    p: NIGParams,
+    r: float,
+    tau: float,
+    *,
+    grid_n: int = 2001,
+    near_root_tol: float = 1e-3,
+) -> float:
     """
     Solve for theta in:
-      kappa(theta+1) - kappa(theta) = r*tau
-    with domain-safe bracketing.
+        kappa(theta+1) - kappa(theta) = r*tau
 
-    NIG log-MGF (kappa) exists only when |beta + u| < alpha.
-    We need this for u=theta and u=theta+1.
+    Pragmatic version:
+    1) search on a dense grid over the admissible interval,
+    2) use Brent if a sign change is found,
+    3) otherwise accept the best theta if the residual is already very small.
     """
     p.validate()
     a, b = float(p.alpha), float(p.beta)
 
-    # Admissible theta interval from:
-    # 1) |b + theta|   < a  ->  -a - b < theta < a - b
-    # 2) |b + theta+1| < a  ->  -a - b - 1 < theta < a - b - 1
-    lo = max(-a - b, -a - b - 1.0)
-    hi = min(a - b,  a - b - 1.0)
-
-    # stay away from boundary
-    eps = 1e-10
-    lo += eps
-    hi -= eps
+    lo = max(-a - b, -a - b - 1.0) + 1e-10
+    hi = min( a - b,  a - b - 1.0) - 1e-10
     if not (np.isfinite(lo) and np.isfinite(hi)) or lo >= hi:
         raise RuntimeError("No admissible theta interval (Esscher transform infeasible for these NIG params).")
 
     def g(th: float) -> float:
         return (nig_kappa(th + 1.0, p, tau) - nig_kappa(th, p, tau)).real - (r * tau)
 
-    # Evaluate g on a small grid to find a sign change
-    grid = np.linspace(lo, hi, 41)
+    grid = np.linspace(lo, hi, int(grid_n))
     vals = np.array([g(t) for t in grid], dtype=float)
 
-    # Find adjacent points with opposite signs
+    # exact / near-exact grid hit
+    j = int(np.nanargmin(np.abs(vals)))
+    th_best = float(grid[j])
+    best_abs = float(abs(vals[j]))
+
+    # first try proper bracketing
     for i in range(len(grid) - 1):
         f0, f1 = vals[i], vals[i + 1]
         if np.isfinite(f0) and np.isfinite(f1) and (f0 * f1 < 0):
             return float(brentq(g, grid[i], grid[i + 1], maxiter=200))
 
-    # If no sign change, it's either no-root or numerically flat
-    j = int(np.nanargmin(np.abs(vals)))
-    th_best = float(grid[j])
+    # fallback: accept best point if residual is tiny
+    if np.isfinite(best_abs) and best_abs <= near_root_tol:
+        return th_best
+
     raise RuntimeError(
         "Could not bracket theta root inside admissible domain. "
-        f"Best |g|={abs(vals[j]):.3e} at theta≈{th_best:.6f}. "
+        f"Best |g|={best_abs:.3e} at theta≈{th_best:.6f}. "
         "Try different starting params or check nig_kappa parameterization."
     )
 
