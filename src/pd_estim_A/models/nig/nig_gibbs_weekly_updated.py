@@ -11,12 +11,16 @@ from pd_estim_A.models.nig.nig_apath import (
 )
 
 
+# ============================================================
 # Helpers
+# ============================================================
 
 def mu_phi_from_params(params: Dict[str, float], h_step: float) -> Tuple[float, float]:
     """
-    Map 'per-unit' NIG params -> (mu_h, phi_h) for the mixing IG at step length h_step
-    (in the SAME time unit as your params).
+    Map per-unit NIG params -> (mu_h, phi_h) for the IG mixing law at step length h_step.
+
+    Parameters in `params` are assumed to be in a fixed time unit (here: annual).
+    The returned (mu_h, phi_h) correspond to one step of length h_step in that same unit.
 
     Uses:
       gamma = sqrt(alpha^2 - beta^2)
@@ -40,7 +44,11 @@ def mu_phi_from_params(params: Dict[str, float], h_step: float) -> Tuple[float, 
 
 
 def params_from_mu_phi(
-    mu_h: float, phi_h: float, mu0_h: float, beta: float, h_step: float
+    mu_h: float,
+    phi_h: float,
+    mu0_h: float,
+    beta: float,
+    h_step: float,
 ) -> Dict[str, float]:
     """
     Map (mu_h, phi_h, mu0_h, beta) at step length h_step back to per-unit params.
@@ -50,6 +58,9 @@ def params_from_mu_phi(
       alpha   = sqrt(beta^2 + gamma^2)
       delta   = delta_h / h_step
       mu0     = mu0_h / h_step
+
+    If h_step = 1/52, then the recovered params are annual when mu_h/phi_h/mu0_h
+    correspond to one weekly increment.
     """
     mu_h = float(mu_h)
     phi_h = float(phi_h)
@@ -74,10 +85,15 @@ def sample_gig(lam: float, chi: float, psi: float, rng: np.random.Generator) -> 
     return float(y * np.sqrt(chi / psi))
 
 
-def sample_z_posterior(returns: np.ndarray, params: Dict[str, float], rng: np.random.Generator) -> np.ndarray:
+def sample_z_posterior(
+    returns: np.ndarray,
+    params: Dict[str, float],
+    rng: np.random.Generator,
+) -> np.ndarray:
     """
-    z_t | r_t for NIG normal-IG mixture.
-    Here params should be STEP params (i.e., for one weekly increment):
+    z_t | r_t for the NIG normal-IG mixture.
+
+    `params` must be STEP parameters for one return increment:
       alpha, delta_step, mu_step
     """
     alpha = float(params["alpha"])
@@ -101,7 +117,7 @@ def sample_mu_phi(
     rng: np.random.Generator,
 ) -> Tuple[float, float]:
     """
-    Sample (mu_h, phi_h) for IG mixing distribution, given z.
+    Sample (mu_h, phi_h) for the IG mixing distribution, given z.
     """
     Tn = len(z)
     if Tn <= 1:
@@ -121,13 +137,13 @@ def sample_mu_phi(
     u3 = Tn * zbar_r + omega / max(eta, 1e-12)
     v = Tn + 2.0 * xi
 
-    # mu
+    # mu_h
     lam_mu = (Tn - 1.0) / 2.0
     a_mu2 = float(phi_current * u1)
     b_mu2 = float(phi_current * u3)
     mu_new = sample_gig(lam_mu, a_mu2, b_mu2, rng)
 
-    # phi
+    # phi_h
     shape_phi = (v + 1.0) / 2.0
     rate_phi = u1 / (2.0 * mu_new) - u2 + (u3 * mu_new) / 2.0
     rate_phi = max(float(rate_phi), 1e-12)
@@ -174,16 +190,28 @@ def sample_beta_mu0(
     return mu0_step, beta
 
 
-# Weekly theta + asset inversion inside Gibbs
+# ============================================================
+# Rates + theta + asset inversion
+# ============================================================
 
 def annual_cc_rate_to_weekly(r_annual: np.ndarray, weeks_per_year: int = 52) -> np.ndarray:
     """
     Convert annual continuously-compounded rate to weekly continuously-compounded rate.
+    Only used for diagnostics / convenience columns. The Gibbs inversion below uses
+    annual rates together with tau_years.
     """
     return np.asarray(r_annual, dtype=float) / float(weeks_per_year)
 
 
 def theta_series_weekly(p: NIGParams, r_week: np.ndarray, tau_weeks: float) -> np.ndarray:
+    """
+    Legacy name kept for compatibility.
+
+    In this project's working weekly-NIG convention:
+      - p contains weekly-step NIG parameters
+      - r_week is the rate series passed by the panel/inversion workflow as-is
+      - tau_weeks should be 1.0 in the weekly inversion workflow
+    """
     out = np.full_like(r_week, np.nan, dtype=float)
     for i, rw in enumerate(r_week):
         if not np.isfinite(rw):
@@ -209,6 +237,12 @@ def invert_assets_on_dates(
     """
     Invert A_t for each observation date (already weekly), returning:
       A_path (len n_obs), theta_path (len n_obs)
+
+    Legacy argument names are kept for compatibility with the rest of the file.
+    In the working weekly-NIG convention used here:
+      - p contains weekly-step parameters
+      - r_week is the panel rate series as passed to invert_asset_one_date
+      - tau_weeks should be 1.0
     """
     A = np.full_like(E, np.nan, dtype=float)
     th = np.full_like(E, np.nan, dtype=float)
@@ -231,6 +265,10 @@ def invert_assets_on_dates(
     return A, th
 
 
+# ============================================================
+# Prior helpers
+# ============================================================
+
 def _coerce_em_params(em_params: Dict[str, float] | pd.Series) -> Dict[str, float]:
     if isinstance(em_params, pd.Series):
         em_params = em_params.to_dict()
@@ -242,7 +280,12 @@ def _coerce_em_params(em_params: Dict[str, float] | pd.Series) -> Dict[str, floa
         "mu": float(em_params["mu"]),
     }
 
-    if not np.isfinite(out["alpha"]) or not np.isfinite(out["beta"]) or not np.isfinite(out["delta"]) or not np.isfinite(out["mu"]):
+    if (
+        not np.isfinite(out["alpha"])
+        or not np.isfinite(out["beta"])
+        or not np.isfinite(out["delta"])
+        or not np.isfinite(out["mu"])
+    ):
         raise ValueError("EM parameters must be finite.")
     if out["delta"] <= 0.0 or out["alpha"] <= 0.0 or abs(out["beta"]) >= out["alpha"]:
         raise ValueError("EM parameters must satisfy delta>0, alpha>0, and |beta|<alpha.")
@@ -253,20 +296,23 @@ def _coerce_em_params(em_params: Dict[str, float] | pd.Series) -> Dict[str, floa
 def _build_default_priors_from_em(
     em_params: Dict[str, float],
     *,
-    h_step: float = 1.0,
+    h_step: float,
     B0_diag: Tuple[float, float] = (50.0, 50.0),
     var_phi: float = 100.0,
     omega: float = 0.001,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
     """
     Default weakly-informative priors centered on the EM point estimate.
-    This preserves the prior construction already in your current Gibbs file,
-    but moves it outside the hard-coded sampler body.
+
+    IMPORTANT:
+    - em_params are assumed to be in ANNUAL units
+    - b0 prior is built for (mu0_step, beta), so mu is converted to mu * h_step
+    - hyper is built for (mu_h, phi_h) at the same step length h_step
     """
     em = _coerce_em_params(em_params)
     mu_h, phi_h = mu_phi_from_params(em, h_step=h_step)
 
-    b0_prior = np.array([em["mu"], em["beta"]], dtype=float)
+    b0_prior = np.array([em["mu"] * h_step, em["beta"]], dtype=float)
     B0_prior = np.diag(np.asarray(B0_diag, dtype=float))
 
     hyper = {
@@ -284,14 +330,28 @@ def _prepare_prior_inputs(
     prior_b0: Optional[np.ndarray] = None,
     prior_B0: Optional[np.ndarray] = None,
     prior_hyper: Optional[Dict[str, float]] = None,
-    h_step: float = 1.0,
+    h_step: float,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    """
+    Prepare Gibbs priors.
+
+    Convention:
+    - em_params are annual
+    - if prior_b0 is passed, it is interpreted as [mu_annual, beta]
+      and converted internally to [mu_step, beta]
+    - prior_hyper, if passed, is assumed already expressed on the Gibbs step scale
+    """
     b0_default, B0_default, hyper_default = _build_default_priors_from_em(
         em_params,
         h_step=h_step,
     )
 
-    b0 = b0_default if prior_b0 is None else np.asarray(prior_b0, dtype=float).reshape(2)
+    if prior_b0 is None:
+        b0 = b0_default
+    else:
+        prior_b0 = np.asarray(prior_b0, dtype=float).reshape(2)
+        b0 = np.array([float(prior_b0[0]) * h_step, float(prior_b0[1])], dtype=float)
+
     B0 = B0_default if prior_B0 is None else np.asarray(prior_B0, dtype=float)
     hyper = hyper_default if prior_hyper is None else {k: float(v) for k, v in prior_hyper.items()}
 
@@ -307,6 +367,10 @@ def _prepare_prior_inputs(
 
     return b0.astype(float), B0.astype(float), hyper
 
+
+# ============================================================
+# Posterior summarization
+# ============================================================
 
 def _posterior_summary(x: np.ndarray) -> Dict[str, np.ndarray]:
     x = np.asarray(x, dtype=float)
@@ -337,11 +401,14 @@ def summarize_gibbs_window(
     A_sum = _posterior_summary(A_draws)
     th_sum = _posterior_summary(theta_draws)
 
-    out = df[["date", "E", "L", "r", "r_week"]].copy()
+    base_cols = [c for c in ["date", "E", "L", "r", "r_week"] if c in df.columns]
+    out = df[base_cols].copy()
+
     out["A_mean"] = A_sum["mean"]
     out["A_median"] = A_sum["median"]
     out["A_q05"] = A_sum["q05"]
     out["A_q95"] = A_sum["q95"]
+
     out["theta_mean"] = th_sum["mean"]
     out["theta_median"] = th_sum["median"]
     out["theta_q05"] = th_sum["q05"]
@@ -350,15 +417,17 @@ def summarize_gibbs_window(
     out["logA_median"] = np.log(np.maximum(out["A_median"].to_numpy(dtype=float), 1e-300))
     out["dlogA_median"] = pd.Series(out["logA_median"]).diff().to_numpy(dtype=float)
 
-    params_weekly = np.asarray(result["params_weekly"], dtype=float)
-    out["alpha_mean"] = float(np.nanmean(params_weekly[:, 0]))
-    out["beta_mean"] = float(np.nanmean(params_weekly[:, 1]))
-    out["delta_mean"] = float(np.nanmean(params_weekly[:, 2]))
-    out["mu_mean"] = float(np.nanmean(params_weekly[:, 3]))
-    out["alpha_median"] = float(np.nanmedian(params_weekly[:, 0]))
-    out["beta_median"] = float(np.nanmedian(params_weekly[:, 1]))
-    out["delta_median"] = float(np.nanmedian(params_weekly[:, 2]))
-    out["mu_median"] = float(np.nanmedian(params_weekly[:, 3]))
+    # use ANNUAL params for the stored summaries
+    params_annual = np.asarray(result["params_annual"], dtype=float)
+    out["alpha_mean"] = float(np.nanmean(params_annual[:, 0]))
+    out["beta_mean"] = float(np.nanmean(params_annual[:, 1]))
+    out["delta_mean"] = float(np.nanmean(params_annual[:, 2]))
+    out["mu_mean"] = float(np.nanmean(params_annual[:, 3]))
+
+    out["alpha_median"] = float(np.nanmedian(params_annual[:, 0]))
+    out["beta_median"] = float(np.nanmedian(params_annual[:, 1]))
+    out["delta_median"] = float(np.nanmedian(params_annual[:, 2]))
+    out["mu_median"] = float(np.nanmedian(params_annual[:, 3]))
 
     out["train_start_req"] = pd.Timestamp(train_start)
     out["train_end_req"] = pd.Timestamp(train_end)
@@ -368,7 +437,10 @@ def summarize_gibbs_window(
     return out
 
 
-# Main Gibbs sampler (weekly)
+# ============================================================
+# Main Gibbs sampler
+# ============================================================
+
 def gibbs_sampler_weekly(
     E_series: np.ndarray,
     L_series: np.ndarray,
@@ -420,19 +492,27 @@ def gibbs_sampler_weekly(
     Lw = L_series[mask]
     rfw_annual = rf_series_annual_cc[mask]
     dates_w = dates[mask]
-    rw_week = annual_cc_rate_to_weekly(rfw_annual, weeks_per_year=weeks_per_year)
 
-    tau_weeks = float(tau_years) * float(weeks_per_year)
+    # WORKING convention for this project:
+    # - EM params are weekly-step
+    # - latent Gibbs updates are weekly-step
+    # - pricing/inversion uses weeklyized cc rate
+    # - tau = 1.0 (not 52.0)
+    rw_week = annual_cc_rate_to_weekly(rfw_annual, weeks_per_year=weeks_per_year)
+    tau_input = float(tau_years)   # should be 1.0 in your workflow
+
     n_obs = int(idx.size)
 
     em = _coerce_em_params(em_params)
     alpha = float(em["alpha"])
-    beta = float(em["beta"])
+    beta  = float(em["beta"])
     delta = float(em["delta"])
-    mu0 = float(em["mu"])
+    mu0   = float(em["mu"])
 
+    # weekly-step convention
     h_step = 1.0
     mu_h, phi_h = mu_phi_from_params(em, h_step=h_step)
+
     b0_prior, B0_prior, hyper = _prepare_prior_inputs(
         em,
         prior_b0=prior_b0,
@@ -467,7 +547,7 @@ def gibbs_sampler_weekly(
                 rw_week,
                 dates_w,
                 p_cur,
-                tau_weeks=tau_weeks,
+                tau_weeks=tau_input,
                 U=U,
                 n=n_int,
             )
@@ -484,6 +564,7 @@ def gibbs_sampler_weekly(
             n_reject += 1
             continue
 
+        # store current state BEFORE updating
         if keep_mask[it]:
             A_draws[k, :] = A_path
             theta_draws[k, :] = theta_path
@@ -494,20 +575,48 @@ def gibbs_sampler_weekly(
             )
             mu_phi_draws[k, :] = np.array([mu_h, phi_h], dtype=float)
 
-        z = sample_z_posterior(rA, {"alpha": alpha, "delta": delta, "mu": mu0}, rng)
+        # z | r using weekly-step params
+        try:
+            z = sample_z_posterior(
+                rA,
+                {"alpha": alpha, "delta": delta, "mu": mu0},
+                rng,
+            )
+        except Exception:
+            n_reject += 1
+            if keep_mask[it]:
+                k += 1
+            continue
 
         try:
-            mu_h_new, phi_h_new = sample_mu_phi(z, phi_current=phi_h, hyper=hyper, rng=rng)
+            mu_h_new, phi_h_new = sample_mu_phi(
+                z,
+                phi_current=phi_h,
+                hyper=hyper,
+                rng=rng,
+            )
         except Exception:
             mu_h_new, phi_h_new = mu_h, phi_h
 
         try:
-            mu0_new, beta_new = sample_beta_mu0(rA, z, b0_prior, B0_prior, rng)
+            mu0_new, beta_new = sample_beta_mu0(
+                rA,
+                z,
+                b0_prior,
+                B0_prior,
+                rng,
+            )
         except Exception:
             mu0_new, beta_new = mu0, beta
 
         try:
-            prop = params_from_mu_phi(mu_h_new, phi_h_new, mu0_h=mu0_new, beta=beta_new, h_step=h_step)
+            prop = params_from_mu_phi(
+                mu_h_new,
+                phi_h_new,
+                mu0_h=mu0_new,
+                beta=beta_new,
+                h_step=h_step,
+            )
             alpha_prop = float(prop["alpha"])
             beta_prop = float(prop["beta"])
             delta_prop = float(prop["delta"])
@@ -530,10 +639,20 @@ def gibbs_sampler_weekly(
         if delta_prop <= 0.0 or alpha_prop <= 0.0 or abs(beta_prop) >= alpha_prop:
             ok = False
 
+        # theta feasibility on the window using weeklyized rates and tau=1
         if ok:
             try:
-                p_prop = NIGParams(alpha=alpha_prop, beta=beta_prop, delta=delta_prop, mu=mu_prop)
-                th_prop = theta_series_weekly(p_prop, rw_week, tau_weeks=tau_weeks)
+                p_prop = NIGParams(
+                    alpha=alpha_prop,
+                    beta=beta_prop,
+                    delta=delta_prop,
+                    mu=mu_prop,
+                )
+                th_prop = theta_series_weekly(
+                    p_prop,
+                    rw_week,
+                    tau_weeks=tau_input,
+                )
                 alpha_floor = max(
                     float(np.nanmax(np.abs(beta_prop + th_prop))),
                     float(np.nanmax(np.abs(beta_prop + th_prop + 1.0))),
@@ -588,12 +707,15 @@ def gibbs_sampler_weekly(
             "n_keep_actual": int(k),
             "n_reject": int(n_reject),
             "weeks_per_year": int(weeks_per_year),
-            "tau_weeks": float(tau_weeks),
+            "tau_weeks": float(tau_input),
             "U": float(U),
             "n_int": int(n_int),
         },
     }
 
+# ============================================================
+# EM source extraction
+# ============================================================
 
 def _extract_window_em_params(
     em_params_source,
@@ -652,6 +774,9 @@ def _extract_window_em_params(
     raise TypeError("Unsupported em_params_source type.")
 
 
+# ============================================================
+# One-window wrapper
+# ============================================================
 
 def run_nig_window_for_firm(
     g_firm_daily: pd.DataFrame,
@@ -681,8 +806,6 @@ def run_nig_window_for_firm(
 ):
     """
     Run the Bayesian NIG training step for ONE firm and ONE training window.
-    The Gibbs sampler itself is unchanged in spirit; this wrapper mainly makes the
-    file mirror the outer structure of run_merton_window_for_firm.
     """
     train_start = pd.Timestamp(train_start)
     train_end = pd.Timestamp(train_end)
@@ -699,6 +822,7 @@ def run_nig_window_for_firm(
                 f"Input must either contain a '{date_col}' column or have a DatetimeIndex."
             )
 
+    g = g.loc[:, ~g.columns.duplicated()].copy()
     g[date_col] = pd.to_datetime(g[date_col], errors="coerce")
 
     gvkey_val = None
@@ -760,7 +884,11 @@ def run_nig_window_for_firm(
     )
 
     g_train_idx = g_train.set_index(date_col).sort_index()
-    g_train_weekly = g_train_idx.reindex(weekly_dates).reset_index().rename(columns={"index": "date"})
+    g_train_weekly = (
+        g_train_idx.reindex(weekly_dates)
+        .reset_index()
+        .rename(columns={"index": "date"})
+    )
 
     n_weekly_train = int(len(g_train_weekly))
     n_weekly_returns = max(n_weekly_train - 1, 0)
@@ -866,17 +994,21 @@ def run_nig_window_for_firm(
             gvkey=gvkey_val,
         )
 
-        params_weekly = np.asarray(result["params_weekly"], dtype=float)
-        alpha_mean = float(np.nanmean(params_weekly[:, 0]))
-        beta_mean = float(np.nanmean(params_weekly[:, 1]))
-        delta_mean = float(np.nanmean(params_weekly[:, 2]))
-        mu_mean = float(np.nanmean(params_weekly[:, 3]))
-        alpha_median = float(np.nanmedian(params_weekly[:, 0]))
-        beta_median = float(np.nanmedian(params_weekly[:, 1]))
-        delta_median = float(np.nanmedian(params_weekly[:, 2]))
-        mu_median = float(np.nanmedian(params_weekly[:, 3]))
+        params_annual = np.asarray(result["params_annual"], dtype=float)
+        alpha_mean = float(np.nanmean(params_annual[:, 0]))
+        beta_mean = float(np.nanmean(params_annual[:, 1]))
+        delta_mean = float(np.nanmean(params_annual[:, 2]))
+        mu_mean = float(np.nanmean(params_annual[:, 3]))
+
+        alpha_median = float(np.nanmedian(params_annual[:, 0]))
+        beta_median = float(np.nanmedian(params_annual[:, 1]))
+        delta_median = float(np.nanmedian(params_annual[:, 2]))
+        mu_median = float(np.nanmedian(params_annual[:, 3]))
+
         A_last_mean = float(np.nanmean(result["A_draws"][:, -1]))
         A_last_median = float(np.nanmedian(result["A_draws"][:, -1]))
+
+    em_clean = _coerce_em_params(em_params)
 
     summary = {
         "gvkey": gvkey_val,
@@ -888,10 +1020,10 @@ def run_nig_window_for_firm(
         "train_end_used_weekly": pd.Timestamp(g_train_weekly["date"].iloc[-1]),
         "ok": bool(ok),
         "msg": msg,
-        "em_alpha": float(_coerce_em_params(em_params)["alpha"]),
-        "em_beta": float(_coerce_em_params(em_params)["beta"]),
-        "em_delta": float(_coerce_em_params(em_params)["delta"]),
-        "em_mu": float(_coerce_em_params(em_params)["mu"]),
+        "em_alpha": float(em_clean["alpha"]),
+        "em_beta": float(em_clean["beta"]),
+        "em_delta": float(em_clean["delta"]),
+        "em_mu": float(em_clean["mu"]),
         "alpha_post_mean": alpha_mean,
         "beta_post_mean": beta_mean,
         "delta_post_mean": delta_mean,
@@ -913,6 +1045,9 @@ def run_nig_window_for_firm(
     return summary, weekly_post, result
 
 
+# ============================================================
+# One-firm rolling wrapper
+# ============================================================
 
 def process_one_firm_nig(
     g_firm_daily: pd.DataFrame,
@@ -942,8 +1077,6 @@ def process_one_firm_nig(
 ):
     """
     Run the rolling Bayesian NIG training workflow for ONE firm across all windows.
-    This mirrors process_one_firm_merton in spirit, but the third output is a list of
-    per-window Gibbs results instead of an OOS PD dataframe.
     """
     g = g_firm_daily.copy()
 
@@ -957,6 +1090,7 @@ def process_one_firm_nig(
                 f"Input must either contain a '{date_col}' column or have a DatetimeIndex."
             )
 
+    g = g.loc[:, ~g.columns.duplicated()].copy()
     g[date_col] = pd.to_datetime(g[date_col], errors="coerce")
 
     if gvkey is None and "gvkey" in g.columns:
