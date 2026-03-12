@@ -1,0 +1,2 @@
+train_years,step_freq,week_freq,forecast_horizon_years,pd_horizon_years,ann_factor,data_end,last_train_end_cal,max_firms,max_windows,max_iter,burn_in,thin,seed,default_B0_diag_1,default_B0_diag_2,phi_prior_variance,omega,n_jobs,n_firms_run,n_windows_schedule,n_summary_rows,n_train_rows,n_oos_rows,n_posterior_objects
+2,QE,W-FRI,1.0,1.0,52.0,2024-12-31,2024-09-30,2,4,2000,500,5,123,50.0,50.0,100.0,0.001,2,2,4,8,834,106,8
