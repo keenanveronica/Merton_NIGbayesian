@@ -2,7 +2,7 @@
 Bayesian weekly NIG structural model utilities via Gibbs sampling.
 
 This module mirrors the high-level workflow and calendar logic of
-`nig_em_afonso.py`, but replaces the frequentist EM estimation step with a
+`nig_em.py`, but replaces the frequentist EM estimation step with a
 Gibbs sampler following the data-augmentation approach of Karlis & Lillestol
 (2004), Approach 1 (Gamma-GIG) for the IG mixing law.
 
@@ -58,7 +58,7 @@ from scipy.stats import gamma as gamma_dist
 from scipy.stats import geninvgauss
 from scipy.stats import multivariate_normal
 
-from pd_estim_A.models.nig.nig_em_afonso import (
+from pd_estim_A.models.nig.nig_em import (
     _as_ts,
     _clean_weekly_panel,
     _make_params_window_feasible,
