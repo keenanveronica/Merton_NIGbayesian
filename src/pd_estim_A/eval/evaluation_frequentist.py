@@ -1,13 +1,16 @@
 import numpy as np
 import pandas as pd
 from math import erf, sqrt
+from scipy.stats import kstest, norm, norminvgauss
 
 
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + erf(x / sqrt(2.0)))
 
+
 def _two_sided_p_from_z(z: float) -> float:
     return 2.0 * (1.0 - _norm_cdf(abs(z)))
+
 
 def _safe_corr(x: pd.Series, y: pd.Series, method="pearson", min_obs=10) -> float:
     ok = x.notna() & y.notna()
@@ -15,10 +18,141 @@ def _safe_corr(x: pd.Series, y: pd.Series, method="pearson", min_obs=10) -> floa
         return np.nan
     return float(x[ok].corr(y[ok], method=method))
 
+
 def _log_ratio_err(x, y, eps=1e-12):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     return np.log(x + eps) - np.log(y + eps)
+
+
+def jarque_bera_test(x, min_obs=30) -> dict:
+    s = pd.to_numeric(pd.Series(x), errors="coerce").dropna()
+    n = int(s.shape[0])
+
+    if n < min_obs:
+        return {
+            "n": n,
+            "skewness": np.nan,
+            "kurtosis": np.nan,
+            "excess_kurtosis": np.nan,
+            "JB": np.nan,
+            "p_value": np.nan,
+            "reject_5pct": np.nan,
+        }
+
+    z = s.to_numpy(dtype=float)
+    z = z - z.mean()
+
+    m2 = float(np.mean(z ** 2))
+    if (not np.isfinite(m2)) or (m2 <= 0):
+        return {
+            "n": n,
+            "skewness": np.nan,
+            "kurtosis": np.nan,
+            "excess_kurtosis": np.nan,
+            "JB": np.nan,
+            "p_value": np.nan,
+            "reject_5pct": np.nan,
+        }
+
+    m3 = float(np.mean(z ** 3))
+    m4 = float(np.mean(z ** 4))
+
+    skew = m3 / (m2 ** 1.5)
+    kurt = m4 / (m2 ** 2)
+    excess_kurt = kurt - 3.0
+
+    jb = (n / 6.0) * (skew ** 2 + 0.25 * (excess_kurt ** 2))
+
+    # JB is asymptotically chi-square with 2 df -> survival function = exp(-x/2)
+    p = float(np.exp(-0.5 * jb))
+
+    return {
+        "n": n,
+        "skewness": float(skew),
+        "kurtosis": float(kurt),
+        "excess_kurtosis": float(excess_kurt),
+        "JB": float(jb),
+        "p_value": p,
+        "reject_5pct": bool(p < 0.05),
+    }
+
+
+def jb_panel_on_returns(df: pd.DataFrame,
+                        value_col: str,
+                        id_col="gvkey",
+                        date_col="date",
+                        min_obs=30,
+                        value_is_return=False,
+                        log_returns=True) -> dict:
+    d = df[[id_col, date_col, value_col]].copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
+    d = d.dropna(subset=[id_col, date_col, value_col]).sort_values([id_col, date_col]).copy()
+
+    if value_is_return:
+        d["ret"] = d[value_col]
+        series_tested = "provided returns"
+    else:
+        if log_returns:
+            d = d[d[value_col] > 0].copy()
+            d["ret"] = d.groupby(id_col)[value_col].transform(lambda s: np.log(s).diff())
+            series_tested = "log returns from levels"
+        else:
+            d["ret"] = d.groupby(id_col)[value_col].pct_change()
+            series_tested = "simple returns from levels"
+
+    ret_df = d[[id_col, date_col, "ret"]].dropna().copy()
+
+    rows = []
+    for gv, g in ret_df.groupby(id_col):
+        out = jarque_bera_test(g["ret"], min_obs=min_obs)
+        out[id_col] = gv
+        rows.append(out)
+
+    by_firm = pd.DataFrame(rows)
+    if by_firm.empty:
+        summary = pd.DataFrame([{
+            "value_col": value_col,
+            "series_tested": series_tested,
+            "n_firms_total": 0,
+            "n_firms_tested": 0,
+            "share_reject_5pct": np.nan,
+            "mean_skewness": np.nan,
+            "mean_excess_kurtosis": np.nan,
+            "median_excess_kurtosis": np.nan,
+            "pooled_JB": np.nan,
+            "pooled_p_value": np.nan,
+            "pooled_reject_5pct": np.nan,
+            "n_returns_pooled": 0,
+        }])
+        return {"summary": summary, "by_firm": by_firm, "returns_panel": ret_df}
+
+    pooled = jarque_bera_test(ret_df["ret"], min_obs=min_obs)
+
+    summary = pd.DataFrame([{
+        "value_col": value_col,
+        "series_tested": series_tested,
+        "n_firms_total": int(ret_df[id_col].nunique()),
+        "n_firms_tested": int(by_firm["JB"].notna().sum()),
+        "share_reject_5pct": float(pd.to_numeric(by_firm["reject_5pct"], errors="coerce").mean()),
+        "mean_skewness": float(by_firm["skewness"].mean()),
+        "mean_excess_kurtosis": float(by_firm["excess_kurtosis"].mean()),
+        "median_excess_kurtosis": float(by_firm["excess_kurtosis"].median()),
+        "pooled_JB": float(pooled["JB"]) if np.isfinite(pooled["JB"]) else np.nan,
+        "pooled_p_value": float(pooled["p_value"]) if np.isfinite(pooled["p_value"]) else np.nan,
+        "pooled_reject_5pct": pooled["reject_5pct"],
+        "n_returns_pooled": int(pooled["n"]),
+    }])
+
+    by_firm = by_firm[[id_col, "n", "skewness", "kurtosis", "excess_kurtosis", "JB", "p_value", "reject_5pct"]]
+    by_firm = by_firm.sort_values(["p_value", "JB"], ascending=[True, False], na_position="last").reset_index(drop=True)
+
+    return {
+        "summary": summary,
+        "by_firm": by_firm,
+        "returns_panel": ret_df,
+    }
 
 
 # Level-fit metrics (PD space + log-PD space)
@@ -255,3 +389,251 @@ def evaluate_models_vs_cds(df: pd.DataFrame,
 
     return {"level_fit": lvl, "tracking": trk_tbl, "dm_test": dm, "paired_corr_tests": paired,
             "firm_metrics": firm_metrics}
+
+
+def _ks_last_row_per_firm_quarter(df: pd.DataFrame,
+                                  selected_quarters: list[str],
+                                  id_col="gvkey",
+                                  date_col="date",
+                                  ok_col: str | None = None) -> pd.DataFrame:
+    d = df.copy()
+    d[id_col] = d[id_col].astype(str)
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce")
+    d["quarter"] = d[date_col].dt.to_period("Q").astype(str)
+
+    if ok_col is not None and ok_col in d.columns:
+        d = d[d[ok_col].fillna(False)].copy()
+
+    d = d[d["quarter"].isin(selected_quarters)].copy()
+    d = d.sort_values([id_col, "quarter", date_col])
+
+    # representative parameter row per firm-quarter = last available row in quarter
+    out = (
+        d.groupby([id_col, "quarter"], as_index=False)
+         .tail(1)
+         .reset_index(drop=True)
+    )
+    return out
+
+
+def _window_log_returns(level_df: pd.DataFrame,
+                        gvkey: str,
+                        level_col: str,
+                        start_date,
+                        end_date,
+                        id_col="gvkey",
+                        date_col="date") -> np.ndarray:
+    g = level_df.copy()
+    g[id_col] = g[id_col].astype(str)
+    g[date_col] = pd.to_datetime(g[date_col], errors="coerce")
+    g[level_col] = pd.to_numeric(g[level_col], errors="coerce")
+
+    g = g[
+        (g[id_col] == str(gvkey)) &
+        (g[date_col] >= pd.Timestamp(start_date)) &
+        (g[date_col] <= pd.Timestamp(end_date))
+    ].copy()
+
+    g = g.dropna(subset=[date_col, level_col]).sort_values(date_col)
+    g = g[g[level_col] > 0].copy()
+
+    if g.shape[0] < 3:
+        return np.array([], dtype=float)
+
+    r = np.diff(np.log(g[level_col].to_numpy(dtype=float)))
+    r = r[np.isfinite(r)]
+    return r
+
+
+def ks_fixed_normal_by_quarter(param_df: pd.DataFrame,
+                               level_df: pd.DataFrame,
+                               selected_quarters: list[str],
+                               *,
+                               level_col="V_used",
+                               mu_col="mu_hat",
+                               sigma_col="sigma_hat",
+                               train_end_col="training_end",
+                               train_start_col=None,
+                               merton_lookback_weeks: int | None = None,
+                               id_col="gvkey",
+                               date_col="date",
+                               min_obs=20) -> dict:
+    """
+    Quarter-specific KS(norm): test observed log-returns in the training window
+    against N(mu_hat, sigma_hat^2), where the parameter row is fixed for that quarter.
+
+    If train_start_col is absent, you must provide merton_lookback_weeks.
+    """
+    rows_q = _ks_last_row_per_firm_quarter(
+        param_df, selected_quarters, id_col=id_col, date_col=date_col, ok_col=None
+    )
+
+    out_rows = []
+    for _, row in rows_q.iterrows():
+        gv = str(row[id_col])
+        q = row["quarter"]
+
+        mu = pd.to_numeric(row.get(mu_col), errors="coerce")
+        sig = pd.to_numeric(row.get(sigma_col), errors="coerce")
+
+        if not np.isfinite(mu) or not np.isfinite(sig) or sig <= 0:
+            continue
+
+        if train_start_col is not None and train_start_col in row.index:
+            train_start = pd.to_datetime(row[train_start_col], errors="coerce")
+        else:
+            if merton_lookback_weeks is None:
+                raise ValueError("For Merton KS, provide train_start_col or merton_lookback_weeks.")
+            train_end_tmp = pd.to_datetime(row.get(train_end_col), errors="coerce")
+            if pd.isna(train_end_tmp):
+                train_end_tmp = pd.to_datetime(row[date_col], errors="coerce")
+            train_start = train_end_tmp - pd.Timedelta(weeks=merton_lookback_weeks)
+
+        train_end = pd.to_datetime(row.get(train_end_col), errors="coerce")
+        if pd.isna(train_end):
+            train_end = pd.to_datetime(row[date_col], errors="coerce")
+
+        r = _window_log_returns(
+            level_df=level_df,
+            gvkey=gv,
+            level_col=level_col,
+            start_date=train_start,
+            end_date=train_end,
+            id_col=id_col,
+            date_col=date_col,
+        )
+
+        if r.size < min_obs:
+            continue
+
+        ks = kstest(r, lambda x: norm.cdf(x, loc=float(mu), scale=float(sig)))
+
+        out_rows.append({
+            "gvkey": gv,
+            "quarter": q,
+            "n_obs": int(r.size),
+            "train_start": pd.Timestamp(train_start),
+            "train_end": pd.Timestamp(train_end),
+            "mu_hat": float(mu),
+            "sigma_hat": float(sig),
+            "KS_D": float(ks.statistic),
+            "KS_p_value": float(ks.pvalue),
+            "reject_5pct": bool(ks.pvalue < 0.05),
+        })
+
+    by_firm_quarter = pd.DataFrame(out_rows).sort_values(["quarter", "gvkey"]).reset_index(drop=True)
+
+    by_quarter = (
+        by_firm_quarter.groupby("quarter", as_index=False)
+        .agg(
+            n_firms=("gvkey", "nunique"),
+            mean_n_obs=("n_obs", "mean"),
+            mean_KS_D=("KS_D", "mean"),
+            median_KS_D=("KS_D", "median"),
+            share_reject_5pct=("reject_5pct", "mean"),
+        )
+        .sort_values("quarter")
+    )
+
+    return {"by_firm_quarter": by_firm_quarter, "by_quarter": by_quarter}
+
+
+def ks_fixed_nig_by_quarter(param_df: pd.DataFrame,
+                            level_df: pd.DataFrame,
+                            selected_quarters: list[str],
+                            *,
+                            level_col="A_hat_oos",
+                            alpha_col="alpha",
+                            beta_col="beta1",
+                            delta_col="delta",
+                            mu_col="beta0",
+                            train_start_col="window_train_start",
+                            train_end_col="window_train_end",
+                            id_col="gvkey",
+                            date_col="date",
+                            ok_col="ok",
+                            min_obs=20) -> dict:
+    """
+    Quarter-specific KS(NIG): test observed log-returns in the training window
+    against NIG(alpha, beta, delta, mu), assuming:
+      beta1 = beta, beta0 = mu
+    and SciPy mapping:
+      a = alpha * delta, b = beta * delta, loc = mu, scale = delta
+    """
+    rows_q = _ks_last_row_per_firm_quarter(
+        param_df, selected_quarters, id_col=id_col, date_col=date_col, ok_col=ok_col
+    )
+
+    out_rows = []
+    for _, row in rows_q.iterrows():
+        gv = str(row[id_col])
+        q = row["quarter"]
+
+        alpha = pd.to_numeric(row.get(alpha_col), errors="coerce")
+        beta = pd.to_numeric(row.get(beta_col), errors="coerce")
+        delta = pd.to_numeric(row.get(delta_col), errors="coerce")
+        mu = pd.to_numeric(row.get(mu_col), errors="coerce")
+
+        if not all(np.isfinite([alpha, beta, delta, mu])):
+            continue
+        if delta <= 0:
+            continue
+        if alpha <= abs(beta):
+            continue
+
+        train_start = pd.to_datetime(row.get(train_start_col), errors="coerce")
+        train_end = pd.to_datetime(row.get(train_end_col), errors="coerce")
+        if pd.isna(train_start) or pd.isna(train_end):
+            continue
+
+        r = _window_log_returns(
+            level_df=level_df,
+            gvkey=gv,
+            level_col=level_col,
+            start_date=train_start,
+            end_date=train_end,
+            id_col=id_col,
+            date_col=date_col,
+        )
+
+        if r.size < min_obs:
+            continue
+
+        a = float(alpha * delta)
+        b = float(beta * delta)
+
+        ks = kstest(
+            r,
+            lambda x: norminvgauss.cdf(x, a=a, b=b, loc=float(mu), scale=float(delta))
+        )
+
+        out_rows.append({
+            "gvkey": gv,
+            "quarter": q,
+            "n_obs": int(r.size),
+            "train_start": pd.Timestamp(train_start),
+            "train_end": pd.Timestamp(train_end),
+            "alpha": float(alpha),
+            "beta": float(beta),
+            "delta": float(delta),
+            "mu": float(mu),
+            "KS_D": float(ks.statistic),
+            "KS_p_value": float(ks.pvalue),
+            "reject_5pct": bool(ks.pvalue < 0.05),
+        })
+
+    by_firm_quarter = pd.DataFrame(out_rows).sort_values(["quarter", "gvkey"]).reset_index(drop=True)
+
+    by_quarter = (
+        by_firm_quarter.groupby("quarter", as_index=False)
+        .agg(
+            n_firms=("gvkey", "nunique"),
+            mean_n_obs=("n_obs", "mean"),
+            mean_KS_D=("KS_D", "mean"),
+            median_KS_D=("KS_D", "median"),
+            share_reject_5pct=("reject_5pct", "mean"),
+        )
+        .sort_values("quarter")
+    )
+
+    return {"by_firm_quarter": by_firm_quarter, "by_quarter": by_quarter}
