@@ -1,0 +1,2 @@
+model,intercept,slope,scale,eps,n_train
+Merton,0.0023982049663050383,0.07147033924431224,level,1e-06,519
